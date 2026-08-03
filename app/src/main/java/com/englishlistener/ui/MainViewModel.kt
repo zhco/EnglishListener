@@ -51,15 +51,31 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun selectStation(station: RadioStation) { _uiState.value = _uiState.value.copy(currentStation = station); player.play(station.name, station.streamUrl) }
+    fun selectStation(station: RadioStation) {
+        _uiState.value = _uiState.value.copy(currentStation = station)
+        player.subtitleAudioProcessor = if (_uiState.value.subtitleEnabled) subtitleProcessor.audioProcessor else null
+        player.play(station.name, station.streamUrl)
+    }
+
     fun togglePlayPause() { player.togglePlayPause() }
     fun startDownload() { viewModelScope.launch { modelManager.downloadAllModels() } }
     fun skipDownload() { _uiState.value = _uiState.value.copy(screen = AppScreen.MAIN) }
 
     fun toggleSubtitle() {
         val enabled = !_uiState.value.subtitleEnabled
-        if (enabled) subtitleProcessor.start() else subtitleProcessor.stop()
         _uiState.value = _uiState.value.copy(subtitleEnabled = enabled)
+        if (enabled) {
+            val ok = subtitleProcessor.start()
+            if (!ok) { _uiState.value = _uiState.value.copy(subtitleEnabled = false); return }
+            player.subtitleAudioProcessor = subtitleProcessor.audioProcessor
+        } else {
+            subtitleProcessor.stop()
+            player.subtitleAudioProcessor = null
+        }
+        if (_uiState.value.currentStation != null && _uiState.value.playerState.isPlaying) {
+            val s = _uiState.value.currentStation!!
+            player.play(s.name, s.streamUrl)
+        }
     }
 
     override fun onCleared() { super.onCleared(); subtitleProcessor.stop(); player.release() }
