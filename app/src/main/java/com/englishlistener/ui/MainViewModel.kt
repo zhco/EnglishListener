@@ -80,7 +80,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun startDownload() {
         viewModelScope.launch {
-            modelManager.downloadTranslationModel()
+            modelManager.downloadAllModels()
         }
     }
 
