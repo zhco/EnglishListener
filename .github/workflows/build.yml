@@ -1,0 +1,66 @@
+name: Build & Release APK
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Generate keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore app/englishlistener.keystore \
+            -alias englishlistener \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=EnglishListener, OU=Dev, O=EnglishListener, L=Beijing, ST=Beijing, C=CN"
+
+      - name: Build release APK
+        run: |
+          chmod +x gradlew 2>/dev/null || true
+          ./gradlew assembleRelease
+
+      - name: Sign APK
+        run: |
+          BUILD_TOOLS=$ANDROID_HOME/build-tools/35.0.0
+          $BUILD_TOOLS/zipalign -v -p 4 \
+            app/build/outputs/apk/release/app-release-unsigned.apk \
+            app/build/outputs/apk/release/EnglishListener.apk
+          $BUILD_TOOLS/apksigner sign \
+            --ks app/englishlistener.keystore \
+            --ks-pass pass:android \
+            --ks-key-alias englishlistener \
+            --key-pass pass:android \
+            app/build/outputs/apk/release/EnglishListener.apk
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: EnglishListener
+          path: app/build/outputs/apk/release/EnglishListener.apk
+
+      - name: Create Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: app/build/outputs/apk/release/EnglishListener.apk
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
