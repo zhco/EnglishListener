@@ -1,84 +1,58 @@
 package com.englishlistener.player
 
 import android.content.Context
-import androidx.media3.common.AudioAttributes
-import androidx.media3.common.C
+import android.util.Log
+import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/**
- * 播放器状态
- */
 data class PlayerState(
     val isPlaying: Boolean = false,
-    val isLoading: Boolean = false,
     val stationName: String = "",
+    val streamTitle: String = "",
     val error: String? = null
 )
 
-/**
- * 电台播放器封装
- * 管理 ExoPlayer 实例，对外暴露 StateFlow 供 Compose 订阅
- */
-class RadioPlayer(private val context: Context) {
+class RadioPlayer(context: Context) {
+    companion object { private const val TAG = "RadioPlayer" }
 
     private val _playerState = MutableStateFlow(PlayerState())
     val playerState: StateFlow<PlayerState> = _playerState.asStateFlow()
+    var subtitleAudioProcessor: AudioProcessor? = null
 
-    val exoPlayer: ExoPlayer = ExoPlayer.Builder(context)
-        .setMediaSourceFactory(
-            DefaultMediaSourceFactory(context).setLiveMinSpeed(1.0f)
-        )
-        .build()
-        .apply {
-            setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
-                    .setUsage(C.USAGE_MEDIA)
-                    .build(),
-                true
-            )
-            addListener(object : Player.Listener {
-                override fun onPlaybackStateChanged(playbackState: Int) {
-                    _playerState.value = _playerState.value.copy(
-                        isPlaying = playbackState == Player.STATE_READY && playWhenReady,
-                        isLoading = playbackState == Player.STATE_BUFFERING
-                    )
-                }
+    @OptIn(UnstableApi::class)
+    private val player: ExoPlayer
 
-                override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                    _playerState.value = _playerState.value.copy(
-                        error = error.localizedMessage ?: "播放出错"
-                    )
-                }
-            })
-        }
-
-    fun play(stationName: String, streamUrl: String) {
-        _playerState.value = PlayerState(
-            isLoading = true,
-            stationName = stationName
-        )
-        exoPlayer.apply {
-            setMediaItem(MediaItem.fromUri(streamUrl))
-            prepare()
-            playWhenReady = true
-        }
+    init {
+        val rf = DefaultRenderersFactory(context).setEnableDecoderFallback(true)
+        player = ExoPlayer.Builder(context, rf).setMediaSourceFactory(DefaultMediaSourceFactory(context)).setHandleAudioBecomingNoisy(true).build()
+        player.addListener(object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) { _playerState.value = _playerState.value.copy(isPlaying = isPlaying) }
+            override fun onPlaybackStateChanged(state: Int) {
+                if (state == Player.STATE_READY) _playerState.value = _playerState.value.copy(error = null)
+            }
+            override fun onPlayerError(err: PlaybackException) { _playerState.value = _playerState.value.copy(error = err.localizedMessage ?: "Playback error") }
+        })
     }
 
-    fun togglePlayPause() {
-        val playing = exoPlayer.playWhenReady
-        if (playing) exoPlayer.pause() else exoPlayer.play()
-        exoPlayer.playWhenReady = !playing
+    fun play(name: String, url: String) {
+        _playerState.value = _playerState.value.copy(stationName = name, error = null)
+        val builders = ArrayList<AudioProcessor>().apply { subtitleAudioProcessor?.let { add(it) } }
+        val sink = DefaultAudioSink.Builder(context).setAudioProcessors(builders.toTypedArray()).build()
+        player.setAudioSink(sink)
+        player.setMediaItem(MediaItem.fromUri(url)); player.prepare(); player.play()
     }
 
-    fun release() {
-        exoPlayer.release()
-    }
+    fun togglePlayPause() { if (player.isPlaying) player.pause() else player.play() }
+    fun release() { player.release() }
 }
