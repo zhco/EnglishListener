@@ -4,6 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -66,14 +67,15 @@ fun EnglishListenerApp(viewModel: MainViewModel = viewModel()) {
                     }
                 }
             ) { innerPadding ->
-                HomeScreen(
-                    stations = uiState.stations,
-                    currentStation = uiState.currentStation,
-                    playerState = uiState.playerState,
-                    onStationClick = { viewModel.selectStation(it) },
-                    onTogglePlayPause = { viewModel.togglePlayPause() },
-                    modifier = Modifier.padding(innerPadding)
-                )
+                Box(modifier = Modifier.padding(innerPadding)) {
+                    HomeScreen(
+                        stations = uiState.stations,
+                        currentStation = uiState.currentStation,
+                        playerState = uiState.playerState,
+                        onStationClick = { viewModel.selectStation(it) },
+                        onTogglePlayPause = { viewModel.togglePlayPause() }
+                    )
+                }
             }
         }
     }
