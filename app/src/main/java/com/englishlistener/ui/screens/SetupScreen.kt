@@ -121,7 +121,7 @@ fun SetupScreen(
                     }
                 }
 
-                Phase.DOWNLOADING, Phase.EXTRACTING -> {
+                Phase.DOWNLOADING -> {
                     DownloadProgressSection(downloadState)
                 }
 
@@ -306,3 +306,4 @@ private fun DownloadProgressSection(state: DownloadState) {
         }
     }
 }
+
