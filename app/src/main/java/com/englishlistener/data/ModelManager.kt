@@ -52,39 +52,60 @@ class ModelManager(private val context: Context) {
     fun isTranslationModelReady() = translationModelFile.exists() && translationModelFile.length() >= MT_SIZE * 0.99
     fun isAsrModelReady() = ASR_REQUIRED_FILES.all { File(asrDir, it).exists() }
     fun areAllModelsReady() = isTranslationModelReady() && isAsrModelReady()
+
     suspend fun downloadAllModels() {
         _ds.value = DownloadState(phase = Phase.CHECKING)
         if (!isAsrModelReady()) { if (!downloadAsrModel()) return }
         if (!isTranslationModelReady()) { if (!downloadTranslationModel()) return }
         _ds.value = DownloadState(phase = Phase.COMPLETED, progress = 1f)
     }
+
     suspend fun downloadTranslationModel(): Boolean {
         val f = translationModelFile; val es = if (f.exists()) f.length() else 0L
         if (es >= MT_SIZE * 0.99) return true
-        _ds.value = DownloadState(phase = Phase.DOWNLOADING, currentFile = "混元翻译模型")
-        return downloadFile(MT_URLS, f, MT_SIZE, es)
+        _ds.value = DownloadState(phase = Phase.DOWNLOADING, currentFile = "混元翻译模型", totalBytes = MT_SIZE)
+        val ok = downloadFile(MT_URLS, f, MT_SIZE, es)
+        if (ok) _ds.value = _ds.value.copy(progress = 1f)
+        return ok
     }
+
     suspend fun downloadAsrModel(): Boolean {
         if (isAsrModelReady()) return true
-        val tb = ASR_FILES.sumOf { it.second }; var db = 0L
+        val tb = ASR_FILES.sumOf { it.second }
         for ((n, s, l) in ASR_FILES) {
             val f = File(asrDir, n); val es = if (f.exists()) f.length() else 0L
-            if (es >= s * 0.99) { db += s; continue }
-            _ds.value = DownloadState(phase = Phase.DOWNLOADING, currentFile = "$l ($n)", downloadedBytes = db, totalBytes = tb)
+            if (es >= s * 0.99) continue
+            _ds.value = DownloadState(phase = Phase.DOWNLOADING, currentFile = "$l ($n)", totalBytes = s)
             if (!downloadFile(listOf("$ASR_BASE/$n", "$ASR_FB/$n"), f, s, es)) return false
-            db += s
+            _ds.value = _ds.value.copy(progress = 1f)
         }
-        _ds.value = DownloadState(phase = Phase.VERIFYING, downloadedBytes = tb, totalBytes = tb, progress = 1f)
+        _ds.value = DownloadState(phase = Phase.VERIFYING, progress = 1f, totalBytes = tb)
         return isAsrModelReady()
     }
+
     private suspend fun downloadFile(urls: List<String>, file: File, exp: Long, es: Long): Boolean = withContext(Dispatchers.IO) {
         for (url in urls) {
             try {
-                val c = (URL(url).openConnection() as HttpURLConnection).apply { connectTimeout = 10000; readTimeout = 30000; setRequestProperty("User-Agent", "EnglishListener/1.0"); if (es > 0) setRequestProperty("Range", "bytes=$es-"); connect() }
-                val ts = when (c.responseCode) { 206 -> c.getHeaderField("Content-Range")?.substringAfter("/")?.toLongOrNull() ?: exp; 200 -> c.contentLengthLong.coerceAtLeast(exp); else -> { Log.e(TAG, "HTTP ${c.responseCode}"); continue } }
-                val inp = c.inputStream ?: continue; val out = FileOutputStream(file, es > 0); val buf = ByteArray(8192); var d = es
+                val c = (URL(url).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 10000; readTimeout = 30000
+                    setRequestProperty("User-Agent", "EnglishListener/1.0")
+                    if (es > 0) setRequestProperty("Range", "bytes=$es-")
+                    connect()
+                }
+                val ts = when (c.responseCode) {
+                    206 -> c.getHeaderField("Content-Range")?.substringAfter("/")?.toLongOrNull() ?: exp
+                    200 -> c.contentLengthLong.coerceAtLeast(exp)
+                    else -> { Log.e(TAG, "HTTP ${c.responseCode} [${url.substringAfterLast('/')}]"); continue }
+                }
+                val inp = c.inputStream ?: continue
+                val out = FileOutputStream(file, es > 0)
+                val buf = ByteArray(8192)
+                var d = es
                 var n: Int
-                while (inp.read(buf).also { n = it } != -1) { out.write(buf, 0, n); d += n; _ds.value = _ds.value.copy(downloadedBytes = _ds.value.downloadedBytes + (d - es), progress = (_ds.value.downloadedBytes + (d - es)).toFloat() / _ds.value.totalBytes) }
+                while (inp.read(buf).also { n = it } != -1) {
+                    out.write(buf, 0, n); d += n
+                    _ds.value = _ds.value.copy(progress = d.toFloat() / ts)
+                }
                 inp.close(); out.close()
                 if (file.length() >= exp * 0.99) return@withContext true
             } catch (e: Exception) { Log.e(TAG, "dl fail: $url", e) }
@@ -92,5 +113,6 @@ class ModelManager(private val context: Context) {
         _ds.value = DownloadState(phase = Phase.FAILED, error = "所有下载源均不可用，请检查网络")
         false
     }
+
     fun deleteModels() { modelsDir.deleteRecursively(); _ds.value = DownloadState(phase = Phase.IDLE) }
 }
