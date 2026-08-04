@@ -21,8 +21,7 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
     val lines: StateFlow<List<SubtitleLine>> = _lines
     private val _running = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _running
-
-    fun start(): Boolean {
+    fun start(streamUrl: String?): Boolean {
         if (_running.value) return true
         asr = AsrEngine(asrDir).also { if (!it.initialize()) { stop(); return false } }
         trans = TranslationEngine(translationModel).also { if (!it.initialize()) { stop(); return false } }
@@ -34,23 +33,13 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
             _lines.value = cur
         }
         audioProcessor.addListener(::onAudio)
+        if (streamUrl != null) audioProcessor.start(streamUrl)
         _running.value = true; return true
     }
-
     private fun onAudio(samples: FloatArray) {
         val r = asr?.processSamples(samples) ?: return
-        if (r.isNotBlank()) {
-            val cur = _lines.value.toMutableList()
-            if (cur.none { it.english == r }) { cur.add(SubtitleLine(r)); _lines.value = cur; trans?.submit(r) }
-        }
+        if (r.isNotBlank()) { val cur = _lines.value.toMutableList(); if (cur.none { it.english == r }) { cur.add(SubtitleLine(r)); _lines.value = cur; trans?.submit(r) } }
     }
-
-    fun stop() {
-        _running.value = false
-        audioProcessor.removeListener(::onAudio)
-        asr?.release(); trans?.release()
-        asr = null; trans = null
-    }
-
+    fun stop() { _running.value = false; audioProcessor.stop(); audioProcessor.removeListener(::onAudio); asr?.release(); trans?.release(); asr = null; trans = null }
     fun destroy() { stop(); scope.cancel(); trans?.destroy() }
 }
