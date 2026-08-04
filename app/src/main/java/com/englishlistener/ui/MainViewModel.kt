@@ -30,9 +30,9 @@ data class UiState(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
-    val player = RadioPlayer(application)
     val modelManager = ModelManager(application)
     val subtitleProcessor = SubtitleProcessor(modelManager.asrDir, modelManager.translationModelFile)
+    val player = RadioPlayer(application, subtitleProcessor.audioProcessor)
 
     init {
         viewModelScope.launch { if (modelManager.areAllModelsReady()) { _uiState.value = _uiState.value.copy(screen = AppScreen.MAIN, isLoading = true) } }
@@ -64,8 +64,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val enabled = !_uiState.value.subtitleEnabled
         _uiState.value = _uiState.value.copy(subtitleEnabled = enabled, isLoading = true)
         if (enabled) {
-            val url = _uiState.value.currentStation?.streamUrl
-            val ok = subtitleProcessor.start(url)
+            val ok = subtitleProcessor.start()
             if (!ok) { _uiState.value = _uiState.value.copy(subtitleEnabled = false, isLoading = false); return }
         } else { subtitleProcessor.stop() }
         _uiState.value = _uiState.value.copy(isLoading = false)
