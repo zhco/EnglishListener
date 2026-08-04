@@ -52,8 +52,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectStation(station: RadioStation) {
         _uiState.value = _uiState.value.copy(currentStation = station, isLoading = true)
-        val proc = if (_uiState.value.subtitleEnabled) subtitleProcessor.audioProcessor else null
-        player.play(station.name, station.streamUrl, proc)
+        player.play(station.name, station.streamUrl)
         _uiState.value = _uiState.value.copy(isLoading = false)
     }
 
@@ -65,15 +64,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val enabled = !_uiState.value.subtitleEnabled
         _uiState.value = _uiState.value.copy(subtitleEnabled = enabled, isLoading = true)
         if (enabled) {
-            val ok = subtitleProcessor.start()
+            val url = _uiState.value.currentStation?.streamUrl
+            val ok = subtitleProcessor.start(url)
             if (!ok) { _uiState.value = _uiState.value.copy(subtitleEnabled = false, isLoading = false); return }
         } else { subtitleProcessor.stop() }
         _uiState.value = _uiState.value.copy(isLoading = false)
-        if (_uiState.value.currentStation != null && _uiState.value.playerState.isPlaying) {
-            val s = _uiState.value.currentStation!!
-            val proc = if (enabled) subtitleProcessor.audioProcessor else null
-            player.play(s.name, s.streamUrl, proc)
-        }
     }
 
     override fun onCleared() { super.onCleared(); subtitleProcessor.stop(); player.release() }
