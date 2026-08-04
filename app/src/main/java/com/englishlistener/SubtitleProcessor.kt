@@ -22,7 +22,7 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
     private val _running = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _running
 
-    fun start(streamUrl: String?): Boolean {
+    fun start(): Boolean {
         if (_running.value) return true
         asr = AsrEngine(asrDir).also { if (!it.initialize()) { stop(); return false } }
         trans = TranslationEngine(translationModel).also { if (!it.initialize()) { stop(); return false } }
@@ -34,7 +34,6 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
             _lines.value = cur
         }
         audioProcessor.addListener(::onAudio)
-        if (streamUrl != null) audioProcessor.start(streamUrl)
         _running.value = true; return true
     }
 
@@ -48,7 +47,7 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
 
     fun stop() {
         _running.value = false
-        audioProcessor.stop(); audioProcessor.removeListener(::onAudio)
+        audioProcessor.removeListener(::onAudio)
         asr?.release(); trans?.release()
         asr = null; trans = null
     }
