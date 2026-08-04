@@ -15,8 +15,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 data class PlayerState(
-    val isPlaying: Boolean = false, val stationName: String = "",
-    val streamTitle: String = "", val error: String? = null
+    val isPlaying: Boolean = false,
+    val isLoading: Boolean = false,
+    val stationName: String = "",
+    val streamTitle: String = "",
+    val error: String? = null
 )
 
 class RadioPlayer(context: Context) {
@@ -39,19 +42,37 @@ class RadioPlayer(context: Context) {
     init {
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { _ps.value = _ps.value.copy(isPlaying = isPlaying) }
-            override fun onPlaybackStateChanged(state: Int) { if (state == Player.STATE_READY) _ps.value = _ps.value.copy(error = null) }
-            override fun onPlayerError(err: PlaybackException) { _ps.value = _ps.value.copy(error = err.localizedMessage ?: "Playback error") }
+            override fun onPlaybackStateChanged(state: Int) {
+                when (state) {
+                    Player.STATE_BUFFERING -> _ps.value = _ps.value.copy(isLoading = true)
+                    Player.STATE_READY -> _ps.value = _ps.value.copy(isLoading = false, error = null)
+                    Player.STATE_IDLE -> _ps.value = _ps.value.copy(isLoading = false)
+                    else -> {}
+                }
+            }
+            override fun onPlayerError(err: PlaybackException) {
+                _ps.value = _ps.value.copy(isLoading = false, error = err.localizedMessage ?: "Playback error")
+            }
         })
     }
 
     fun play(name: String, url: String) {
-        _ps.value = _ps.value.copy(stationName = name, error = null)
+        _ps.value = _ps.value.copy(stationName = name, isLoading = true, error = null)
         player.stop(); player.release()
         player = buildPlayer()
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { _ps.value = _ps.value.copy(isPlaying = isPlaying) }
-            override fun onPlaybackStateChanged(state: Int) { if (state == Player.STATE_READY) _ps.value = _ps.value.copy(error = null) }
-            override fun onPlayerError(err: PlaybackException) { _ps.value = _ps.value.copy(error = err.localizedMessage ?: "Playback error") }
+            override fun onPlaybackStateChanged(state: Int) {
+                when (state) {
+                    Player.STATE_BUFFERING -> _ps.value = _ps.value.copy(isLoading = true)
+                    Player.STATE_READY -> _ps.value = _ps.value.copy(isLoading = false, error = null)
+                    Player.STATE_IDLE -> _ps.value = _ps.value.copy(isLoading = false)
+                    else -> {}
+                }
+            }
+            override fun onPlayerError(err: PlaybackException) {
+                _ps.value = _ps.value.copy(isLoading = false, error = err.localizedMessage ?: "Playback error")
+            }
         })
         player.setMediaItem(MediaItem.fromUri(url))
         player.prepare(); player.play()
