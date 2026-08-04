@@ -2,13 +2,16 @@ package com.englishlistener.player
 
 import android.content.Context
 import androidx.annotation.OptIn
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.audio.AudioSink
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,18 +29,34 @@ class RadioPlayer(context: Context) {
     private val appContext = context.applicationContext
     private val _ps = MutableStateFlow(PlayerState())
     val playerState: StateFlow<PlayerState> = _ps.asStateFlow()
-    var subtitleAudioProcessor: AudioProcessor? = null
 
     @OptIn(UnstableApi::class)
-    private fun buildPlayer(): ExoPlayer {
-        val rf = DefaultRenderersFactory(appContext).setEnableDecoderFallback(true)
-        val builder = ExoPlayer.Builder(appContext, rf)
+    private fun buildPlayer(processor: AudioProcessor?): ExoPlayer {
+        val rf = object : DefaultRenderersFactory(appContext) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioTrackPlaybackParams: Boolean,
+                offloadMode: Int
+            ): AudioSink {
+                val builder = DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                    .setOffloadMode(offloadMode)
+                if (processor != null) {
+                    builder.setAudioProcessors(arrayOf(processor))
+                }
+                return builder.build()
+            }
+        }
+        rf.setEnableDecoderFallback(true)
+        return ExoPlayer.Builder(appContext, rf)
             .setMediaSourceFactory(DefaultMediaSourceFactory(appContext))
             .setHandleAudioBecomingNoisy(true)
-        return builder.build()
+            .build()
     }
 
-    private var player: ExoPlayer = buildPlayer()
+    private var player: ExoPlayer = buildPlayer(null)
 
     init {
         player.addListener(object : Player.Listener {
@@ -56,10 +75,10 @@ class RadioPlayer(context: Context) {
         })
     }
 
-    fun play(name: String, url: String) {
+    fun play(name: String, url: String, processor: AudioProcessor? = null) {
         _ps.value = _ps.value.copy(stationName = name, isLoading = true, error = null)
         player.stop(); player.release()
-        player = buildPlayer()
+        player = buildPlayer(processor)
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { _ps.value = _ps.value.copy(isPlaying = isPlaying) }
             override fun onPlaybackStateChanged(state: Int) {
