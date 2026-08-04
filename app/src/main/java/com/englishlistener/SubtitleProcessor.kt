@@ -11,18 +11,21 @@ import java.io.File
 
 data class SubtitleLine(val english: String, val chinese: String = "")
 
-class SubtitleProcessor(private val asrDir: File, private val translationModel: File) {
+class SubtitleProcessor(
+    private val asrDir: File,
+    private val translationModel: File,
+    private val audioProcessor: AudioCaptureProcessor
+) {
     companion object { private const val TAG = "SubtitleProcessor" }
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var asr: AsrEngine? = null
     private var trans: TranslationEngine? = null
-    val audioProcessor = AudioCaptureProcessor()
     private val _lines = MutableStateFlow<List<SubtitleLine>>(emptyList())
     val lines: StateFlow<List<SubtitleLine>> = _lines
     private val _running = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _running
 
-    fun start(streamUrl: String?): Boolean {
+    fun start(): Boolean {
         if (_running.value) return true
         asr = AsrEngine(asrDir).also { if (!it.initialize()) { stop(); return false } }
         trans = TranslationEngine(translationModel).also { if (!it.initialize()) { stop(); return false } }
@@ -34,8 +37,9 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
             _lines.value = cur
         }
         audioProcessor.addListener(::onAudio)
-        if (streamUrl != null) audioProcessor.start(streamUrl)
-        _running.value = true; return true
+        audioProcessor.setActive(true)
+        _running.value = true
+        return true
     }
 
     private fun onAudio(samples: FloatArray) {
@@ -48,7 +52,8 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
 
     fun stop() {
         _running.value = false
-        audioProcessor.stop(); audioProcessor.removeListener(::onAudio)
+        audioProcessor.setActive(false)
+        audioProcessor.removeListener(::onAudio)
         asr?.release(); trans?.release()
         asr = null; trans = null
     }
