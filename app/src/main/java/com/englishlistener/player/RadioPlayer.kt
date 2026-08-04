@@ -6,7 +6,6 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -21,20 +20,14 @@ data class PlayerState(
 )
 
 class RadioPlayer(context: Context) {
-    val audioProcessor = AudioCaptureProcessor()
-
     private val appContext = context.applicationContext
     private val _ps = MutableStateFlow(PlayerState())
     val playerState: StateFlow<PlayerState> = _ps.asStateFlow()
 
     private fun buildPlayer(): ExoPlayer {
         val rf = DefaultRenderersFactory(appContext).apply { setEnableDecoderFallback(true) }
-        val audioSink = DefaultAudioSink.Builder(appContext)
-            .setAudioProcessors(arrayOf(audioProcessor))
-            .build()
         return ExoPlayer.Builder(appContext, rf)
             .setMediaSourceFactory(DefaultMediaSourceFactory(appContext))
-            .setAudioSink(audioSink)
             .setHandleAudioBecomingNoisy(true)
             .build()
     }
@@ -47,7 +40,7 @@ class RadioPlayer(context: Context) {
             override fun onPlaybackStateChanged(state: Int) {
                 when (state) {
                     Player.STATE_BUFFERING -> _ps.value = _ps.value.copy(isLoading = true)
-                    Player.STATE_READY -> _ps.value = _ps.value.copy(isLoading = false)
+                    Player.STATE_READY -> _ps.value = _ps.value.copy(isLoading = false, error = null)
                     Player.STATE_IDLE -> _ps.value = _ps.value.copy(isLoading = false)
                     else -> {}
                 }
@@ -67,7 +60,7 @@ class RadioPlayer(context: Context) {
             override fun onPlaybackStateChanged(state: Int) {
                 when (state) {
                     Player.STATE_BUFFERING -> _ps.value = _ps.value.copy(isLoading = true)
-                    Player.STATE_READY -> _ps.value = _ps.value.copy(isLoading = false)
+                    Player.STATE_READY -> _ps.value = _ps.value.copy(isLoading = false, error = null)
                     Player.STATE_IDLE -> _ps.value = _ps.value.copy(isLoading = false)
                     else -> {}
                 }
