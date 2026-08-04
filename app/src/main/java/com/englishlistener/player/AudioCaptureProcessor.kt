@@ -80,7 +80,7 @@ class AudioCaptureProcessor {
         val buf = ByteArray(8192)
         val initial = ByteArrayOutputStream()
         var totalRead = 0
-        while (isActive && initial.size() < 524288) {
+        while (initial.size() < 524288) {
             val n = input.read(buf)
             if (n <= 0) break
             if (icyMetaInt > 0 && totalRead > 0 && totalRead % icyMetaInt == 0) {
@@ -110,7 +110,7 @@ class AudioCaptureProcessor {
         var leftover = FloatArray(0)
         var codecStopped = false
 
-        while (isActive && !codecStopped) {
+        while (!codecStopped) {
             val n = input.read(buf)
             if (n > 0) {
                 totalRead += n
