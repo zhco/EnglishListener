@@ -22,26 +22,25 @@ data class UiState(
     val playerState: PlayerState = PlayerState(),
     val downloadState: DownloadState = DownloadState(),
     val subtitleEnabled: Boolean = false,
+    val isLoading: Boolean = false,
     val englishSubtitles: List<String> = emptyList(),
     val chineseSubtitles: List<String> = emptyList()
 )
 
 class MainViewModel(application: Application) : AndroidViewModel(application) {
-
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
-
     val player = RadioPlayer(application)
     val modelManager = ModelManager(application)
     val subtitleProcessor = SubtitleProcessor(modelManager.asrDir, modelManager.translationModelFile)
 
     init {
-        viewModelScope.launch { if (modelManager.areAllModelsReady()) _uiState.value = _uiState.value.copy(screen = AppScreen.MAIN) }
+        viewModelScope.launch { if (modelManager.areAllModelsReady()) { _uiState.value = _uiState.value.copy(screen = AppScreen.MAIN, isLoading = true) } }
         viewModelScope.launch { player.playerState.collect { ps -> _uiState.value = _uiState.value.copy(playerState = ps) } }
         viewModelScope.launch {
             modelManager.downloadState.collect { ds ->
-                _uiState.value = _uiState.value.copy(downloadState = ds)
-                if (ds.phase == Phase.COMPLETED) { delay(1200); _uiState.value = _uiState.value.copy(screen = AppScreen.MAIN) }
+                _uiState.value = _uiState.value.copy(downloadState = ds, isLoading = ds.phase != Phase.COMPLETED)
+                if (ds.phase == Phase.COMPLETED && _uiState.value.screen == AppScreen.SETUP) { delay(1200); _uiState.value = _uiState.value.copy(screen = AppScreen.MAIN, isLoading = false) }
             }
         }
         viewModelScope.launch {
@@ -52,26 +51,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun selectStation(station: RadioStation) {
-        _uiState.value = _uiState.value.copy(currentStation = station)
+        _uiState.value = _uiState.value.copy(currentStation = station, isLoading = true)
         player.subtitleAudioProcessor = if (_uiState.value.subtitleEnabled) subtitleProcessor.audioProcessor else null
-        player.play(station.name, station.streamUrl)
+        player.play(station.name, station.streamUrl); _uiState.value = _uiState.value.copy(isLoading = false)
     }
 
     fun togglePlayPause() { player.togglePlayPause() }
-    fun startDownload() { viewModelScope.launch { modelManager.downloadAllModels() } }
+    fun startDownload() { _uiState.value = _uiState.value.copy(isLoading = true); viewModelScope.launch { modelManager.downloadAllModels() } }
     fun skipDownload() { _uiState.value = _uiState.value.copy(screen = AppScreen.MAIN) }
 
     fun toggleSubtitle() {
         val enabled = !_uiState.value.subtitleEnabled
-        _uiState.value = _uiState.value.copy(subtitleEnabled = enabled)
+        _uiState.value = _uiState.value.copy(subtitleEnabled = enabled, isLoading = true)
         if (enabled) {
             val ok = subtitleProcessor.start()
-            if (!ok) { _uiState.value = _uiState.value.copy(subtitleEnabled = false); return }
+            if (!ok) { _uiState.value = _uiState.value.copy(subtitleEnabled = false, isLoading = false); return }
             player.subtitleAudioProcessor = subtitleProcessor.audioProcessor
-        } else {
-            subtitleProcessor.stop()
-            player.subtitleAudioProcessor = null
-        }
+        } else { subtitleProcessor.stop(); player.subtitleAudioProcessor = null }
+        _uiState.value = _uiState.value.copy(isLoading = false)
         if (_uiState.value.currentStation != null && _uiState.value.playerState.isPlaying) {
             val s = _uiState.value.currentStation!!
             player.play(s.name, s.streamUrl)
