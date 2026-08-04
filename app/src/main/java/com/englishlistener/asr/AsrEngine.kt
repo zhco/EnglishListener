@@ -19,22 +19,13 @@ class AsrEngine(private val asrDir: File) {
                 featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
                 modelConfig = OnlineModelConfig(
                     transducer = OnlineTransducerModelConfig(
-                        encoder = enc.absolutePath,
-                        decoder = dec.absolutePath,
-                        joiner = joi.absolutePath
-                    ),
-                    tokens = tok.absolutePath,
-                    numThreads = 2,
-                    provider = "cpu",
-                    modelType = "zipformer"
-                ),
+                        encoder = enc.absolutePath, decoder = dec.absolutePath, joiner = joi.absolutePath),
+                    tokens = tok.absolutePath, numThreads = 2, provider = "cpu", modelType = "zipformer"),
                 endpointConfig = EndpointConfig(
                     rule1 = EndpointRule(false, 2.4f, 0.0f),
                     rule2 = EndpointRule(true, 1.2f, 0.0f),
-                    rule3 = EndpointRule(false, 0.0f, 20.0f)
-                ),
-                enableEndpoint = true
-            )
+                    rule3 = EndpointRule(false, 0.0f, 20.0f)),
+                enableEndpoint = true)
             recognizer = OnlineRecognizer(config = cfg)
             stream = recognizer!!.createStream()
             true
@@ -54,8 +45,8 @@ class AsrEngine(private val asrDir: File) {
         return null
     }
 
-    fun reset() { try { recognizer?.reset(stream) } catch (_: Exception) {} }
     fun release() {
+        recognizer?.let { rec -> stream?.let { s -> try { rec.reset(s) } catch (_: Exception) {} } }
         try { stream?.release() } catch (_: Exception) {}
         try { recognizer?.release() } catch (_: Exception) {}
         stream = null; recognizer = null
