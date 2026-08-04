@@ -42,30 +42,27 @@ class AudioCaptureProcessor {
         }
     }
 
-    /** If URL ends in .m3u8, download playlist and extract first media segment URL */
     private fun resolveM3u8(url: String): String {
         if (!url.endsWith(".m3u8", ignoreCase = true)) return url
-        try {
+        return try {
             val conn = (URL(url).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 8000; readTimeout = 8000
                 setRequestProperty("User-Agent", "EnglishListener/1.0")
             }
             val text = conn.inputStream.bufferedReader().readText()
             conn.disconnect()
-            // parse HLS playlist: find lines that are URLs (http/https)
             val lines = text.lines().map { it.trim() }.filter { it.startsWith("http") }
-            if (lines.isNotEmpty()) {
-                // if master playlist (has STREAM-INF), pick first variant
-                if (text.contains("#EXT-X-STREAM-INF")) {
-                    Log.i(TAG, "master playlist, picking variant: ${lines[0]}")
-                    return resolveM3u8(lines[0])
-                }
-                // segment playlist: return first segment
-                Log.i(TAG, "segment playlist, using: ${lines[0]}")
-                return lines[0]
+            if (lines.isEmpty()) return url
+            if (text.contains("#EXT-X-STREAM-INF")) {
+                Log.i(TAG, "master playlist, picking variant: ${lines[0]}")
+                return resolveM3u8(lines[0])
             }
-        } catch (e: Exception) { Log.e(TAG, "m3u8 resolve failed", e) }
-        return url
+            Log.i(TAG, "segment playlist, using: ${lines[0]}")
+            lines[0]
+        } catch (e: Exception) {
+            Log.e(TAG, "m3u8 resolve failed", e)
+            url
+        }
     }
 
     private fun processStream(streamUrl: String) {
@@ -74,46 +71,40 @@ class AudioCaptureProcessor {
             setRequestProperty("User-Agent", "EnglishListener/1.0")
             setRequestProperty("Icy-MetaData", "1")
             instanceFollowRedirects = true
-            if (responseCode != 200) { Log.e(TAG, "HTTP ${responseCode}"); return@launch }
         }
+        if (conn.responseCode != 200) { Log.e(TAG, "HTTP ${conn.responseCode}"); conn.disconnect(); return }
 
         val icyMetaInt = conn.getHeaderField("Icy-MetaInt")?.toIntOrNull() ?: 0
         val input = BufferedInputStream(conn.inputStream)
 
-        // Read initial chunk to detect MIME
         val buf = ByteArray(8192)
         val initial = ByteArrayOutputStream()
         var totalRead = 0
         while (isActive && initial.size() < 524288) {
             val n = input.read(buf)
             if (n <= 0) break
-            // skip ICY metadata
             if (icyMetaInt > 0 && totalRead > 0 && totalRead % icyMetaInt == 0) {
                 val metaLen = input.read() * 16
-                if (metaLen > 0) {
-                    val skip = ByteArray(metaLen); var s = 0
-                    while (s < metaLen) { val r = input.read(skip, s, metaLen - s); if (r <= 0) break; s += r }
-                }
+                if (metaLen > 0) skipBytes(input, metaLen)
             }
             initial.write(buf, 0, n); totalRead += n
         }
         val initialBytes = initial.toByteArray()
         initial.close()
+        if (initialBytes.isEmpty()) { input.close(); return }
         Log.i(TAG, "initial chunk: ${initialBytes.size} bytes")
 
-        val mime = if ((initialBytes[0].toInt() and 0xFF) == 0xFF && (initialBytes[1].toInt() and 0xE0) == 0xE0) "audio/mpeg" else "audio/mpeg"
-        Log.i(TAG, "detected mime: $mime")
+        val mime = "audio/mpeg"
 
         val codec = try {
             val c = MediaCodec.createDecoderByType(mime)
             c.configure(MediaFormat.createAudioFormat(mime, 44100, 2), null, null, 0)
-            c.start()
-            c
-        } catch (e: Exception) { Log.e(TAG, "codec fail", e); input.close(); return }
+            c.start(); c
+        } catch (e: Exception) {
+            Log.e(TAG, "codec fail", e); input.close(); return
+        }
 
         val info = MediaCodec.BufferInfo()
-
-        // Feed initial chunk
         feedCodec(codec, ByteBuffer.wrap(initialBytes), 0)
 
         var leftover = FloatArray(0)
@@ -125,21 +116,18 @@ class AudioCaptureProcessor {
                 totalRead += n
                 if (icyMetaInt > 0 && totalRead % icyMetaInt == 0) {
                     val metaLen = input.read() * 16
-                    if (metaLen > 0) {
-                        val skip = ByteArray(metaLen); var s = 0
-                        while (s < metaLen) { val r = input.read(skip, s, metaLen - s); if (r <= 0) break; s += r }
-                    }
+                    if (metaLen > 0) skipBytes(input, metaLen)
                 }
                 feedCodec(codec, ByteBuffer.wrap(buf, 0, n), 0)
             }
 
             var oi = codec.dequeueOutputBuffer(info, 5000)
             while (oi >= 0) {
-                if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) { codecStopped = true; break }
-                val ob = codec.getOutputBuffer(oi)!!
-                val frameCount = info.size / 2
-                if (frameCount > 0) {
+                if ((info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) { codecStopped = true; break }
+                val ob = codec.getOutputBuffer(oi)
+                if (ob != null && info.size > 1) {
                     ob.position(info.offset)
+                    val frameCount = info.size / 2
                     val shorts = ShortArray(frameCount)
                     ob.asShortBuffer().get(shorts)
 
@@ -150,9 +138,9 @@ class AudioCaptureProcessor {
                     val monoLen = if (actualCh >= 2) frameCount / actualCh else frameCount
                     val mono = FloatArray(monoLen)
                     if (actualCh >= 2) {
-                        for (i in 0 until monoLen) mono[i] = (shorts[i * actualCh] + shorts[i * actualCh + 1]) / 65536f
+                        for (i in 0 until monoLen) mono[i] = (shorts[i * actualCh].toInt() + shorts[i * actualCh + 1].toInt()) / 65536f
                     } else {
-                        for (i in 0 until monoLen) mono[i] = shorts[i] / 32768f
+                        for (i in 0 until monoLen) mono[i] = shorts[i].toInt() / 32768f
                     }
 
                     val combined = leftover + mono
@@ -172,10 +160,20 @@ class AudioCaptureProcessor {
         Log.i(TAG, "stream ended")
     }
 
+    private fun skipBytes(input: java.io.InputStream, n: Int) {
+        val sbuf = ByteArray(minOf(n, 4096))
+        var remain = n
+        while (remain > 0) {
+            val r = input.read(sbuf, 0, minOf(sbuf.size, remain))
+            if (r <= 0) break
+            remain -= r
+        }
+    }
+
     private fun feedCodec(codec: MediaCodec, data: ByteBuffer, flags: Int) {
         var ii = codec.dequeueInputBuffer(10000)
         while (ii >= 0 && data.hasRemaining()) {
-            val ib = codec.getInputBuffer(ii)!!
+            val ib = codec.getInputBuffer(ii) ?: break
             val n = minOf(ib.remaining(), data.remaining())
             if (n > 0) {
                 val slice = data.slice(); slice.limit(n)
