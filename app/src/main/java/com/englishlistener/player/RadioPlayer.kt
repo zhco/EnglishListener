@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -19,17 +20,18 @@ data class PlayerState(
     val error: String? = null
 )
 
-class RadioPlayer(context: Context) {
+class RadioPlayer(context: Context, private val audioProcessor: AudioProcessor? = null) {
     private val appContext = context.applicationContext
     private val _ps = MutableStateFlow(PlayerState())
     val playerState: StateFlow<PlayerState> = _ps.asStateFlow()
 
     private fun buildPlayer(): ExoPlayer {
         val rf = DefaultRenderersFactory(appContext).apply { setEnableDecoderFallback(true) }
-        return ExoPlayer.Builder(appContext, rf)
+        val builder = ExoPlayer.Builder(appContext, rf)
             .setMediaSourceFactory(DefaultMediaSourceFactory(appContext))
             .setHandleAudioBecomingNoisy(true)
-            .build()
+        if (audioProcessor != null) builder.setAudioProcessors(arrayOf(audioProcessor))
+        return builder.build()
     }
 
     private var player: ExoPlayer = buildPlayer()
