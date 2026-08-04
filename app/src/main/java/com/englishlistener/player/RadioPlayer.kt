@@ -1,17 +1,12 @@
 package com.englishlistener.player
 
 import android.content.Context
-import androidx.annotation.OptIn
-import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.audio.AudioProcessor
-import androidx.media3.common.audio.AudioSink
-import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -30,23 +25,11 @@ class RadioPlayer(context: Context) {
     private val _ps = MutableStateFlow(PlayerState())
     val playerState: StateFlow<PlayerState> = _ps.asStateFlow()
 
-    @OptIn(UnstableApi::class)
     private fun buildPlayer(processor: AudioProcessor?): ExoPlayer {
         val rf = object : DefaultRenderersFactory(appContext) {
-            override fun buildAudioSink(
-                context: Context,
-                enableFloatOutput: Boolean,
-                enableAudioTrackPlaybackParams: Boolean,
-                offloadMode: Int
-            ): AudioSink {
-                val builder = DefaultAudioSink.Builder(context)
-                    .setEnableFloatOutput(enableFloatOutput)
-                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                    .setOffloadMode(offloadMode)
-                if (processor != null) {
-                    builder.setAudioProcessors(arrayOf(processor))
-                }
-                return builder.build()
+            override fun buildAudioProcessors(): Array<AudioProcessor> {
+                val base = super.buildAudioProcessors()
+                return if (processor != null) base + processor else base
             }
         }
         rf.setEnableDecoderFallback(true)
