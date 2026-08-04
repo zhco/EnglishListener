@@ -4,11 +4,8 @@ import android.content.Context
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.audio.AudioProcessor
-import androidx.media3.common.audio.AudioSink
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -26,27 +23,9 @@ class RadioPlayer(context: Context) {
     private val appContext = context.applicationContext
     private val _ps = MutableStateFlow(PlayerState())
     val playerState: StateFlow<PlayerState> = _ps.asStateFlow()
-    private var audioProcessor: AudioProcessor? = null
 
     private fun buildPlayer(): ExoPlayer {
-        val rf = object : DefaultRenderersFactory(appContext) {
-            override fun buildAudioSink(
-                context: Context,
-                enableFloatOutput: Boolean,
-                enableAudioTrackPlaybackParams: Boolean,
-                enableOffload: Boolean
-            ): AudioSink {
-                val builder = DefaultAudioSink.Builder(context)
-                    .setEnableFloatOutput(enableFloatOutput)
-                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                val proc = audioProcessor
-                if (proc != null) {
-                    builder.setAudioProcessors(arrayOf(proc))
-                }
-                return builder.build()
-            }
-        }
-        rf.setEnableDecoderFallback(true)
+        val rf = DefaultRenderersFactory(appContext).apply { setEnableDecoderFallback(true) }
         return ExoPlayer.Builder(appContext, rf)
             .setMediaSourceFactory(DefaultMediaSourceFactory(appContext))
             .setHandleAudioBecomingNoisy(true)
@@ -72,10 +51,9 @@ class RadioPlayer(context: Context) {
         })
     }
 
-    fun play(name: String, url: String, processor: AudioProcessor? = null) {
+    fun play(name: String, url: String) {
         _ps.value = _ps.value.copy(stationName = name, isLoading = true, error = null)
         player.stop(); player.release()
-        audioProcessor = processor
         player = buildPlayer()
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { _ps.value = _ps.value.copy(isPlaying = isPlaying) }
