@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
@@ -20,25 +19,15 @@ data class PlayerState(
     val error: String? = null
 )
 
-class RadioPlayer(context: Context, private val audioProcessor: AudioProcessor? = null) {
+class RadioPlayer(context: Context) {
     private val appContext = context.applicationContext
     private val _ps = MutableStateFlow(PlayerState())
     val playerState: StateFlow<PlayerState> = _ps.asStateFlow()
-
     private fun buildPlayer(): ExoPlayer {
-        val rf = if (audioProcessor != null) {
-            CaptureRenderersFactory(appContext, audioProcessor).apply { setEnableDecoderFallback(true) }
-        } else {
-            DefaultRenderersFactory(appContext).apply { setEnableDecoderFallback(true) }
-        }
-        return ExoPlayer.Builder(appContext, rf)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(appContext))
-            .setHandleAudioBecomingNoisy(true)
-            .build()
+        val rf = DefaultRenderersFactory(appContext).apply { setEnableDecoderFallback(true) }
+        return ExoPlayer.Builder(appContext, rf).setMediaSourceFactory(DefaultMediaSourceFactory(appContext)).setHandleAudioBecomingNoisy(true).build()
     }
-
     private var player: ExoPlayer = buildPlayer()
-
     init {
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { _ps.value = _ps.value.copy(isPlaying = isPlaying) }
@@ -50,16 +39,12 @@ class RadioPlayer(context: Context, private val audioProcessor: AudioProcessor? 
                     else -> {}
                 }
             }
-            override fun onPlayerError(err: PlaybackException) {
-                _ps.value = _ps.value.copy(isLoading = false, error = err.localizedMessage ?: "Playback error")
-            }
+            override fun onPlayerError(err: PlaybackException) { _ps.value = _ps.value.copy(isLoading = false, error = err.localizedMessage ?: "Playback error") }
         })
     }
-
     fun play(name: String, url: String) {
         _ps.value = _ps.value.copy(stationName = name, isLoading = true, error = null)
-        player.stop(); player.release()
-        player = buildPlayer()
+        player.stop(); player.release(); player = buildPlayer()
         player.addListener(object : Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { _ps.value = _ps.value.copy(isPlaying = isPlaying) }
             override fun onPlaybackStateChanged(state: Int) {
@@ -70,14 +55,10 @@ class RadioPlayer(context: Context, private val audioProcessor: AudioProcessor? 
                     else -> {}
                 }
             }
-            override fun onPlayerError(err: PlaybackException) {
-                _ps.value = _ps.value.copy(isLoading = false, error = err.localizedMessage ?: "Playback error")
-            }
+            override fun onPlayerError(err: PlaybackException) { _ps.value = _ps.value.copy(isLoading = false, error = err.localizedMessage ?: "Playback error") }
         })
-        player.setMediaItem(MediaItem.fromUri(url))
-        player.prepare(); player.play()
+        player.setMediaItem(MediaItem.fromUri(url)); player.prepare(); player.play()
     }
-
     fun togglePlayPause() { if (player.isPlaying) player.pause() else player.play() }
     fun release() { player.release() }
 }
