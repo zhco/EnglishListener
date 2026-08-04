@@ -52,8 +52,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun selectStation(station: RadioStation) {
         _uiState.value = _uiState.value.copy(currentStation = station, isLoading = true)
-        player.subtitleAudioProcessor = if (_uiState.value.subtitleEnabled) subtitleProcessor.audioProcessor else null
-        player.play(station.name, station.streamUrl); _uiState.value = _uiState.value.copy(isLoading = false)
+        val proc = if (_uiState.value.subtitleEnabled) subtitleProcessor.audioProcessor else null
+        player.play(station.name, station.streamUrl, proc)
+        _uiState.value = _uiState.value.copy(isLoading = false)
     }
 
     fun togglePlayPause() { player.togglePlayPause() }
@@ -66,12 +67,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (enabled) {
             val ok = subtitleProcessor.start()
             if (!ok) { _uiState.value = _uiState.value.copy(subtitleEnabled = false, isLoading = false); return }
-            player.subtitleAudioProcessor = subtitleProcessor.audioProcessor
-        } else { subtitleProcessor.stop(); player.subtitleAudioProcessor = null }
+        } else { subtitleProcessor.stop() }
         _uiState.value = _uiState.value.copy(isLoading = false)
         if (_uiState.value.currentStation != null && _uiState.value.playerState.isPlaying) {
             val s = _uiState.value.currentStation!!
-            player.play(s.name, s.streamUrl)
+            val proc = if (enabled) subtitleProcessor.audioProcessor else null
+            player.play(s.name, s.streamUrl, proc)
         }
     }
 
