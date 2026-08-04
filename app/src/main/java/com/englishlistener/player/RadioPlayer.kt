@@ -26,12 +26,15 @@ class RadioPlayer(context: Context, private val audioProcessor: AudioProcessor? 
     val playerState: StateFlow<PlayerState> = _ps.asStateFlow()
 
     private fun buildPlayer(): ExoPlayer {
-        val rf = DefaultRenderersFactory(appContext).apply { setEnableDecoderFallback(true) }
-        val builder = ExoPlayer.Builder(appContext, rf)
+        val rf = if (audioProcessor != null) {
+            CaptureRenderersFactory(appContext, audioProcessor).apply { setEnableDecoderFallback(true) }
+        } else {
+            DefaultRenderersFactory(appContext).apply { setEnableDecoderFallback(true) }
+        }
+        return ExoPlayer.Builder(appContext, rf)
             .setMediaSourceFactory(DefaultMediaSourceFactory(appContext))
             .setHandleAudioBecomingNoisy(true)
-        if (audioProcessor != null) builder.setAudioProcessors(arrayOf(audioProcessor))
-        return builder.build()
+            .build()
     }
 
     private var player: ExoPlayer = buildPlayer()
