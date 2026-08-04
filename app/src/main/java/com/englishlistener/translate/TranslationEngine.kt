@@ -27,13 +27,12 @@ class TranslationEngine(private val modelFile: File) {
     private fun startWorker() {
         scope.launch {
             while (running.get()) {
-                val text = queue.poll() ?: run { delay(50); continue }
+                val text = queue.poll()
+                if (text == null) { delay(50); continue }
                 try {
-                    val sys = "<|system|>You are a professional translator. Translate English to Chinese. Output ONLY Chinese.</s>"
-                    val user = "<|user|>$text</s>"
-                    val prompt = "$sys
-$user
-<|assistant|>"
+                    val sys = "<|system|>You are a professional translator. Translate English to Chinese. Output ONLY Chinese.<|end|>"
+                    val user = "<|user|>" + text + "<|end|>"
+                    val prompt = sys + "\n" + user + "\n<|assistant|>"
                     val r = bridge?.generate(prompt, 256)?.trim() ?: ""
                     if (r.isNotEmpty()) { val cb = onTranslation ?: continue; cb(text, r) }
                 } catch (e: Exception) { Log.e("TransEngine", "err", e) }
