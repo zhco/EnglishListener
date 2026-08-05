@@ -10,7 +10,8 @@ class AsrEngine(private val asrDir: File) {
     private var stream: OnlineStream? = null
     private var lastPartial = ""
 
-    fun initialize(): Boolean {
+    /** Returns null on success, error message on failure */
+    fun initialize(): String? {
         val enc = File(asrDir, "encoder-epoch-99-avg-1.int8.onnx")
         val dec = File(asrDir, "decoder-epoch-99-avg-1.int8.onnx")
         val joi = File(asrDir, "joiner-epoch-99-avg-1.int8.onnx")
@@ -22,8 +23,7 @@ class AsrEngine(private val asrDir: File) {
         val missing = listOf("encoder" to enc, "decoder" to dec, "joiner" to joi, "tokens" to tok)
             .filter { !it.second.exists() }.map { it.first }
         if (missing.isNotEmpty()) {
-            Log.e(TAG, "Missing ASR files: $missing")
-            return false
+            return "缺少模型文件: ${missing.joinToString(", ")}"
         }
         return try {
             val cfg = OnlineRecognizerConfig(
@@ -40,10 +40,11 @@ class AsrEngine(private val asrDir: File) {
             recognizer = OnlineRecognizer(config = cfg)
             stream = recognizer!!.createStream()
             Log.d(TAG, "ASR initialized OK")
-            true
+            null
         } catch (e: Exception) {
-            Log.e(TAG, "ASR init exception: ${e.message}", e)
-            false
+            val msg = e.message ?: e.toString()
+            Log.e(TAG, "ASR init exception: $msg", e)
+            msg
         }
     }
 
