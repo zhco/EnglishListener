@@ -21,6 +21,8 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
     val audioProcessor = AudioCaptureProcessor()
     private val _lines = MutableStateFlow<List<SubtitleLine>>(emptyList())
     val lines: StateFlow<List<SubtitleLine>> = _lines
+    private val _captureStatus = MutableStateFlow("idle")
+    val captureStatus: StateFlow<String> = _captureStatus
     private val _running = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _running
     private var audioCount = 0
@@ -68,25 +70,32 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
         }
         audioCount = 0
         audioProcessor.addListener(::onAudio)
+        audioProcessor.addStatusListener(::onCaptureStatus)
         _running.value = true
         return true
     }
 
+    private fun onCaptureStatus(status: String) {
+        Log.d(TAG, "captureStatus: $status")
+        _captureStatus.value = status
+    }
+
     private fun onAudio(samples: FloatArray) {
         audioCount++
+        if (audioCount % 100 == 0) Log.d(TAG, "onAudio #$audioCount")
         val result = asr?.processSamples(samples) ?: return
         val text = result.text
         if (text.isBlank()) return
 
         val cur = _lines.value.toMutableList()
-        // skip placeholder lines (init messages)
-        val realStart = cur.indexOfLast { it.english.startsWith("ASR") || it.english.startsWith("模型") || it.english.startsWith("翻译") }
+        val realStart = cur.indexOfLast {
+            it.english.startsWith("ASR") || it.english.startsWith("模型") || it.english.startsWith("翻译")
+        }
         val lastIdx = cur.size - 1
         val lastReal = if (lastIdx > realStart) lastIdx else -1
 
         if (lastReal >= 0) {
             val prev = cur[lastReal].english
-            // same line getting longer: update in-place
             val prefLen = min(prev.length, 8)
             val isExtension = (prev.isNotEmpty() && text.startsWith(prev)) ||
                 (text.length > prev.length && prefLen > 0 && text.contains(prev.substring(0, prefLen)))
@@ -98,7 +107,6 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
             }
         }
 
-        // genuinely new line (after endpoint or different utterance)
         if (cur.none { it.english == text }) {
             cur.add(SubtitleLine(text))
             _lines.value = cur
@@ -109,6 +117,8 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
     fun stop() {
         _running.value = false
         audioProcessor.removeListener(::onAudio)
+        audioProcessor.removeStatusListener(::onCaptureStatus)
+        _captureStatus.value = "stopped"
         asr?.release(); trans?.release()
         asr = null; trans = null
     }
