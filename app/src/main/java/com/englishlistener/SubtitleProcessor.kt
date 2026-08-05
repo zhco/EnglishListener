@@ -4,6 +4,7 @@ import android.util.Log
 import com.englishlistener.asr.AsrEngine
 import com.englishlistener.asr.AsrResult
 import com.englishlistener.player.AudioCaptureProcessor
+import com.englishlistener.player.SystemAudioCapture
 import com.englishlistener.translate.TranslationEngine
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,6 +20,7 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
     private var asr: AsrEngine? = null
     private var trans: TranslationEngine? = null
     val audioProcessor = AudioCaptureProcessor()
+    private var systemCapture: SystemAudioCapture? = null
     private val _lines = MutableStateFlow<List<SubtitleLine>>(emptyList())
     val lines: StateFlow<List<SubtitleLine>> = _lines
     private val _captureStatus = MutableStateFlow("idle")
@@ -69,10 +71,20 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
             _lines.value = cur
         }
         audioCount = 0
-        audioProcessor.addListener(::onAudio)
-        audioProcessor.addStatusListener(::onCaptureStatus)
         _running.value = true
         return true
+    }
+
+    fun startStreamCapture(streamUrl: String) {
+        audioProcessor.addListener(::onAudio)
+        audioProcessor.addStatusListener(::onCaptureStatus)
+        audioProcessor.start(streamUrl)
+    }
+
+    fun startSystemCapture(capture: SystemAudioCapture) {
+        systemCapture = capture
+        capture.addListener(::onAudio)
+        capture.addStatusListener(::onCaptureStatus)
     }
 
     private fun onCaptureStatus(status: String) {
@@ -118,6 +130,9 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
         _running.value = false
         audioProcessor.removeListener(::onAudio)
         audioProcessor.removeStatusListener(::onCaptureStatus)
+        systemCapture?.removeListener(::onAudio)
+        systemCapture?.removeStatusListener(::onCaptureStatus)
+        systemCapture = null
         _captureStatus.value = "stopped"
         asr?.release(); trans?.release()
         asr = null; trans = null
