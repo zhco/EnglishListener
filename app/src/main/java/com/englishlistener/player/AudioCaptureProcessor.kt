@@ -94,7 +94,7 @@ class AudioCaptureProcessor {
                 for (line in text.lines()) {
                     val trimmed = line.trim()
                     if (trimmed.startsWith("#EXT-X-STREAM-INF")) {
-                        val bw = Regex("BANDWIDTH=(\d+)").find(trimmed)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                        val bw = Regex("BANDWIDTH=(\\d+)").find(trimmed)?.groupValues?.get(1)?.toIntOrNull() ?: 0
                         if (bw > bestBandwidth) bestBandwidth = bw
                     } else if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
                         bestUrl = if (trimmed.startsWith("http")) trimmed
@@ -120,7 +120,7 @@ class AudioCaptureProcessor {
         return ResolvedStream(url, false, "unknown")
     }
 
-    private fun decodeMPEG(input: InputStream) {
+    private suspend fun decodeMPEG(input: InputStream) {
         Log.d(TAG, "decodeMPEG start")
         val codec = try {
             MediaCodec.createDecoderByType("audio/mpeg")
