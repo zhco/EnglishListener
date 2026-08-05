@@ -39,9 +39,9 @@ class ModelManager(private val context: Context) {
         private const val ASR_BASE = "https://hf-mirror.com/csukuangfj/$ASR_MODEL/resolve/main"
         private const val ASR_FB = "https://huggingface.co/csukuangfj/$ASR_MODEL/resolve/main"
         private val ASR_FILES = listOf(
-            Triple("encoder-epoch-99-avg-1.int8.onnx", 176000000L, "语音识别引擎"),
-            Triple("decoder-epoch-99-avg-1.int8.onnx", 13091040L, "语音解码器"),
-            Triple("joiner-epoch-99-avg-1.int8.onnx", 3228404L, "连接器"),
+            Triple("encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx", 74600000L, "语音识别引擎"),
+            Triple("decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx", 1370000L, "语音解码器"),
+            Triple("joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx", 265000L, "连接器"),
             Triple("tokens.txt", 50000L, "词表")
         )
         val ASR_REQUIRED_FILES = ASR_FILES.map { it.first }
