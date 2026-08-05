@@ -25,11 +25,30 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
 
     fun start(): Boolean {
         if (_running.value) return true
-        Log.d(TAG, "start: initializing ASR...")
-        asr = AsrEngine(asrDir).also { if (!it.initialize()) { Log.e(TAG, "ASR init failed"); stop(); return false } }
-        Log.d(TAG, "ASR initialized OK, initializing translation...")
-        trans = TranslationEngine(translationModel).also { if (!it.initialize()) { Log.e(TAG, "Translation init failed"); stop(); return false } }
+        _lines.value = listOf(SubtitleLine("正在初始化ASR模型...", ""))
+        Log.d(TAG, "start: initializing ASR from $asrDir exists=${asrDir.exists()}...")
+        asr = AsrEngine(asrDir)
+        if (!asr!!.initialize()) {
+            val err = "ASR初始化失败: 模型文件可能未下载或损坏"
+            Log.e(TAG, err)
+            _lines.value = listOf(SubtitleLine(err, "请确认模型已下载"))
+            asr = null
+            return false
+        }
+        _lines.value = listOf(SubtitleLine("ASR就绪，正在加载翻译模型...", ""))
+        Log.d(TAG, "ASR initialized OK, initializing translation from $translationModel exists=${translationModel.exists()}...")
+        trans = TranslationEngine(translationModel)
+        if (!trans!!.initialize()) {
+            val err = "翻译模型加载失败: 文件可能未下载或损坏"
+            Log.e(TAG, err)
+            _lines.value = listOf(SubtitleLine(err, "请确认模型已下载"))
+            asr?.release()
+            asr = null
+            trans = null
+            return false
+        }
         Log.d(TAG, "Translation initialized OK, adding audio listener")
+        _lines.value = listOf(SubtitleLine("模型就绪，等待音频...", "请确保已选择电台"))
         trans?.onTranslation = { eng, ch ->
             Log.d(TAG, "translation: $eng -> $ch")
             val cur = _lines.value.toMutableList()
@@ -47,6 +66,9 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
 
     private fun onAudio(samples: FloatArray) {
         audioCount++
+        if (audioCount == 1) {
+            Log.d(TAG, "onAudio #1: ${samples.size} samples - AUDIO FLOWING!")
+        }
         if (audioCount <= 3 || audioCount % 100 == 0) Log.d(TAG, "onAudio #$audioCount: ${samples.size} samples")
         val r = asr?.processSamples(samples) ?: return
         if (r.isNotBlank()) {
