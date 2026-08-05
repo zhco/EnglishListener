@@ -19,7 +19,7 @@ class TranslationEngine(private val modelFile: File) {
             bridge = LlamaBridge(modelFile.absolutePath)
             running.set(true); startWorker()
             Log.i("TransEngine", "ready"); true
-        } catch (e: Exception) { Log.e("TransEngine", "init fail", e); false }
+        } catch (e: Throwable) { Log.e("TransEngine", "init fail", e); false }
     }
 
     fun submit(text: String) { if (text.isNotBlank()) queue.offer(text) }
@@ -35,7 +35,7 @@ class TranslationEngine(private val modelFile: File) {
                     val prompt = sys + "\n" + user + "\n<|assistant|>"
                     val r = bridge?.generate(prompt, 256)?.trim() ?: ""
                     if (r.isNotEmpty()) { val cb = onTranslation ?: continue; cb(text, r) }
-                } catch (e: Exception) { Log.e("TransEngine", "err", e) }
+                } catch (e: Throwable) { Log.e("TransEngine", "err", e) }
             }
         }
     }
