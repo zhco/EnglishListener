@@ -34,15 +34,18 @@ class ModelManager(private val context: Context) {
             "https://hf-mirror.com/AngelSlim/Hy-MT1.5-1.8B-1.25bit-GGUF/resolve/main/$MT_FILE",
             "https://huggingface.co/AngelSlim/Hy-MT1.5-1.8B-1.25bit-GGUF/resolve/main/$MT_FILE"
         )
-        private const val ASR_BASE = "https://hf-mirror.com/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main"
-        private const val ASR_FB = "https://huggingface.co/csukuangfj/sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20/resolve/main"
+        // English-only zipformer model (better English accuracy than bilingual)
+        private const val ASR_MODEL = "sherpa-onnx-streaming-zipformer-en-2023-06-26"
+        private const val ASR_BASE = "https://hf-mirror.com/csukuangfj/$ASR_MODEL/resolve/main"
+        private const val ASR_FB = "https://huggingface.co/csukuangfj/$ASR_MODEL/resolve/main"
         private val ASR_FILES = listOf(
-            Triple("encoder-epoch-99-avg-1.int8.onnx", 181895032L, "语音识别引擎"),
+            Triple("encoder-epoch-99-avg-1.int8.onnx", 176000000L, "语音识别引擎"),
             Triple("decoder-epoch-99-avg-1.int8.onnx", 13091040L, "语音解码器"),
             Triple("joiner-epoch-99-avg-1.int8.onnx", 3228404L, "连接器"),
-            Triple("tokens.txt", 56317L, "词表")
+            Triple("tokens.txt", 50000L, "词表")
         )
         val ASR_REQUIRED_FILES = ASR_FILES.map { it.first }
+        private const val VERSION_FILE = "model_version.txt"
     }
     private val _ds = MutableStateFlow(DownloadState())
     val downloadState: StateFlow<DownloadState> = _ds.asStateFlow()
@@ -50,12 +53,23 @@ class ModelManager(private val context: Context) {
     val asrDir: File get() = File(modelsDir, "asr").also { it.mkdirs() }
     val translationModelFile: File get() = File(modelsDir, MT_FILE)
     fun isTranslationModelReady() = translationModelFile.exists() && translationModelFile.length() >= MT_SIZE * 0.99
-    fun isAsrModelReady() = ASR_REQUIRED_FILES.all { File(asrDir, it).exists() }
+    fun isAsrModelReady(): Boolean {
+        val vf = File(asrDir, VERSION_FILE)
+        if (!vf.exists() || vf.readText().trim() != ASR_MODEL) return false
+        return ASR_REQUIRED_FILES.all { File(asrDir, it).exists() }
+    }
     fun areAllModelsReady() = isTranslationModelReady() && isAsrModelReady()
 
     suspend fun downloadAllModels() {
         _ds.value = DownloadState(phase = Phase.CHECKING)
-        if (!isAsrModelReady()) { if (!downloadAsrModel()) return }
+        if (!isAsrModelReady()) {
+            val vf = File(asrDir, VERSION_FILE)
+            if (vf.exists() && vf.readText().trim() != ASR_MODEL) {
+                asrDir.listFiles()?.forEach { it.delete() }
+                Log.d(TAG, "Cleared old ASR model")
+            }
+            if (!downloadAsrModel()) return
+        }
         if (!isTranslationModelReady()) { if (!downloadTranslationModel()) return }
         _ds.value = DownloadState(phase = Phase.COMPLETED, progress = 1f)
     }
@@ -79,6 +93,7 @@ class ModelManager(private val context: Context) {
             if (!downloadFile(listOf("$ASR_BASE/$n", "$ASR_FB/$n"), f, s, es)) return false
             _ds.value = _ds.value.copy(progress = 1f)
         }
+        File(asrDir, VERSION_FILE).writeText(ASR_MODEL)
         _ds.value = DownloadState(phase = Phase.VERIFYING, progress = 1f, totalBytes = tb)
         return isAsrModelReady()
     }
