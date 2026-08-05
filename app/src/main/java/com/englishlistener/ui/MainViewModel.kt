@@ -32,7 +32,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
     val modelManager = ModelManager(application)
     val subtitleProcessor = SubtitleProcessor(modelManager.asrDir, modelManager.translationModelFile)
-    val player = RadioPlayer(application, subtitleProcessor.audioProcessor)
+    val player = RadioPlayer(application)
 
     init {
         viewModelScope.launch { if (modelManager.areAllModelsReady()) { _uiState.value = _uiState.value.copy(screen = AppScreen.MAIN, isLoading = true) } }
