@@ -4,8 +4,6 @@ import android.content.Context
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.audio.AudioProcessor
-import androidx.media3.common.audio.AudioProcessorChain
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.RenderersFactory
@@ -15,7 +13,6 @@ import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import java.nio.ByteBuffer
 
 data class PlayerState(
     val isPlaying: Boolean = false,
@@ -31,32 +28,21 @@ class RadioPlayer(context: Context, private val audioProcessor: AudioCaptureProc
     val playerState: StateFlow<PlayerState> = _ps.asStateFlow()
 
     private fun buildPlayer(): ExoPlayer {
-        val factory = if (audioProcessor != null) {
-            RenderersFactory { handler, _, audioListener, _, _ ->
-                val chain = object : AudioProcessorChain {
-                    override fun apply(input: AudioProcessor): AudioProcessor {
-                        return object : AudioProcessor {
-                            override fun configure(f: AudioProcessor.AudioFormat) = f
-                            override fun isActive() = false
-                            override fun queueInput(b: ByteBuffer) {}
-                            override fun queueEndOfStream() {}
-                            override fun getOutput() = ByteBuffer.allocateDirect(0)
-                            override fun isEnded() = true
-                            override fun flush() {}
-                            override fun reset() {}
-                        }
-                    }
-                    override fun apply(skip: Boolean, procs: Array<out AudioProcessor>): Array<AudioProcessor> {
-                        return (procs.toList() + audioProcessor!!).toTypedArray()
-                    }
-                    override fun getMediaDuration(speed: Float): Long = -1
-                }
-                val sink = DefaultAudioSink.Builder(appContext).setAudioProcessorChain(chain).build()
-                arrayOf(MediaCodecAudioRenderer(appContext, MediaCodecSelector.DEFAULT, handler, audioListener, sink))
+        val ap = audioProcessor
+        return if (ap != null) {
+            val rf = RenderersFactory { handler, _, audioListener, _, _ ->
+                val sink = DefaultAudioSink.Builder(appContext)
+                    .setAudioProcessors(ap)
+                    .build()
+                arrayOf(MediaCodecAudioRenderer(
+                    appContext, MediaCodecSelector.DEFAULT,
+                    handler, audioListener, sink
+                ))
             }
-        } else null
-        return if (factory != null) ExoPlayer.Builder(appContext, factory).setHandleAudioBecomingNoisy(true).build()
-        else ExoPlayer.Builder(appContext).setHandleAudioBecomingNoisy(true).build()
+            ExoPlayer.Builder(appContext, rf)
+        } else {
+            ExoPlayer.Builder(appContext)
+        }.setHandleAudioBecomingNoisy(true).build()
     }
 
     private var player: ExoPlayer = buildPlayer()
