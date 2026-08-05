@@ -1,20 +1,22 @@
 package com.englishlistener.player
 
 import android.content.Context
-import android.os.Handler
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
+import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
-import androidx.media3.exoplayer.DefaultRenderersFactory
+import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.RenderersFactory
+import androidx.media3.exoplayer.audio.AudioProcessorChain
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.nio.ByteBuffer
 
 data class PlayerState(
     val isPlaying: Boolean = false,
@@ -30,17 +32,32 @@ class RadioPlayer(context: Context, private val audioProcessor: AudioCaptureProc
     val playerState: StateFlow<PlayerState> = _ps.asStateFlow()
 
     private fun buildPlayer(): ExoPlayer {
-        val rf = if (audioProcessor != null) {
-            object : RenderersFactory {
-                override fun createRenderers(eh: Handler, vl: Any, al: Any, to: Any, mo: Any): Array<Renderer> {
-                    val sink = DefaultAudioSink.Builder(appContext).setAudioProcessors(audioProcessor).build()
-                    return arrayOf(MediaCodecAudioRenderer(appContext, MediaCodecSelector.DEFAULT, eh, al as? androidx.media3.exoplayer.audio.AudioRendererEventListener?, sink))
+        val factory = if (audioProcessor != null) {
+            RenderersFactory { handler, videoListener, audioListener, _, _ ->
+                val chain = object : AudioProcessorChain {
+                    override fun apply(params: PlaybackParameters): AudioProcessor {
+                        return object : AudioProcessor {
+                            override fun configure(f: AudioProcessor.AudioFormat) = f
+                            override fun isActive() = false
+                            override fun queueInput(b: ByteBuffer) {}
+                            override fun queueEndOfStream() {}
+                            override fun getOutput() = ByteBuffer.allocateDirect(0)
+                            override fun isEnded() = true
+                            override fun flush() {}
+                            override fun reset() {}
+                        }
+                    }
+                    override fun apply(skip: Boolean, procs: Array<out AudioProcessor>): Array<AudioProcessor> {
+                        return (procs.toList() + audioProcessor!!).toTypedArray()
+                    }
+                    override fun getMediaDuration(speed: Float): Long = -1
                 }
+                val sink = DefaultAudioSink.Builder(appContext).setAudioProcessorChain(chain).build()
+                arrayOf(MediaCodecAudioRenderer(appContext, MediaCodecSelector.DEFAULT, handler, audioListener, sink))
             }
-        } else {
-            DefaultRenderersFactory(appContext).apply { setEnableDecoderFallback(true) }
-        }
-        return ExoPlayer.Builder(appContext, rf).setMediaSourceFactory(DefaultMediaSourceFactory(appContext)).setHandleAudioBecomingNoisy(true).build()
+        } else null
+        return if (factory != null) ExoPlayer.Builder(appContext, factory).setHandleAudioBecomingNoisy(true).build()
+        else ExoPlayer.Builder(appContext).setHandleAudioBecomingNoisy(true).build()
     }
 
     private var player: ExoPlayer = buildPlayer()
@@ -53,7 +70,6 @@ class RadioPlayer(context: Context, private val audioProcessor: AudioCaptureProc
                     Player.STATE_BUFFERING -> _ps.value = _ps.value.copy(isLoading = true)
                     Player.STATE_READY -> _ps.value = _ps.value.copy(isLoading = false, error = null)
                     Player.STATE_IDLE -> _ps.value = _ps.value.copy(isLoading = false)
-                    else -> {}
                 }
             }
             override fun onPlayerError(err: PlaybackException) { _ps.value = _ps.value.copy(isLoading = false, error = err.localizedMessage ?: "Playback error") }
@@ -70,7 +86,6 @@ class RadioPlayer(context: Context, private val audioProcessor: AudioCaptureProc
                     Player.STATE_BUFFERING -> _ps.value = _ps.value.copy(isLoading = true)
                     Player.STATE_READY -> _ps.value = _ps.value.copy(isLoading = false, error = null)
                     Player.STATE_IDLE -> _ps.value = _ps.value.copy(isLoading = false)
-                    else -> {}
                 }
             }
             override fun onPlayerError(err: PlaybackException) { _ps.value = _ps.value.copy(isLoading = false, error = err.localizedMessage ?: "Playback error") }
