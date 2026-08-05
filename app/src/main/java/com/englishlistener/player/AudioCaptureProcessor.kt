@@ -167,24 +167,36 @@ class AudioCaptureProcessor {
         Log.d(TAG, "decodeMPEG done")
     }
 
-    private fun decodeTS(input: InputStream) {
+    private suspend fun decodeTS(input: InputStream) = withContext(Dispatchers.IO) {
         Log.d(TAG, "decodeTS start")
-        val tempFile = java.io.File.createTempFile("ts_seg", ".ts")
         try {
-            val output = tempFile.outputStream()
-            val buf = ByteArray(BUFFER_SIZE)
-            var read: Int
-            while (isRunning) {
-                read = input.read(buf)
-                if (read < 0) break
-                output.write(buf, 0, read)
-            }
-            output.close()
+            val pipe = android.os.ParcelFileDescriptor.createPipe()
+            val readFd = pipe[0]
+            val writeFd = pipe[1]
 
-            if (!tempFile.exists() || tempFile.length() < TS_PACKET_SIZE) return
+            // Writer coroutine: pump HTTP stream into pipe
+            val pumpJob = launch(Dispatchers.IO) {
+                try {
+                    val out = android.os.ParcelFileDescriptor.AutoCloseOutputStream(writeFd)
+                    val buf = ByteArray(BUFFER_SIZE * 4)
+                    var totalWritten = 0L
+                    while (isRunning) {
+                        val n = input.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        totalWritten += n
+                        // throttle: don't fill pipe faster than extractor reads
+                        if (totalWritten > 512 * 1024) { delay(5) }
+                    }
+                    out.close()
+                } catch (e: Exception) {
+                    Log.w(TAG, "pipe writer error: ${e.message}")
+                }
+            }
 
             val extractor = MediaExtractor()
-            extractor.setDataSource(tempFile.absolutePath)
+            extractor.setDataSource(readFd.fileDescriptor, 0, Long.MAX_VALUE)
+            
             var audioTrack = -1
             var format: MediaFormat? = null
             for (i in 0 until extractor.trackCount) {
@@ -194,7 +206,11 @@ class AudioCaptureProcessor {
                 }
             }
             if (audioTrack < 0 || format == null) {
-                Log.w(TAG, "no audio track in TS"); extractor.release(); return
+                Log.w(TAG, "no audio track in TS")
+                pumpJob.cancel()
+                extractor.release()
+                readFd.close()
+                return@withContext
             }
             Log.d(TAG, "TS audio: ${format.getString(MediaFormat.KEY_MIME)} sr=${format.getInteger(MediaFormat.KEY_SAMPLE_RATE)} ch=${format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)}")
 
@@ -209,7 +225,7 @@ class AudioCaptureProcessor {
             var eos = false
 
             while (isRunning && !eos) {
-                val idx = codec.dequeueInputBuffer(10000)
+                val idx = codec.dequeueInputBuffer(5000)
                 if (idx >= 0) {
                     val inBuf = codec.getInputBuffer(idx)!!
                     val sampleSize = extractor.readSampleData(inBuf, 0)
@@ -222,7 +238,7 @@ class AudioCaptureProcessor {
                     }
                 }
 
-                val outIdx = codec.dequeueOutputBuffer(bufInfo, 10000)
+                val outIdx = codec.dequeueOutputBuffer(bufInfo, 5000)
                 if (outIdx >= 0) {
                     val outBuf = codec.getOutputBuffer(outIdx) ?: continue
                     val pair = processPCM(outBuf, bufInfo, leftover)
@@ -238,10 +254,10 @@ class AudioCaptureProcessor {
             }
             codec.stop(); codec.release()
             extractor.release()
+            pumpJob.cancel()
+            readFd.close()
         } catch (e: Exception) {
             Log.e(TAG, "TS decode error", e)
-        } finally {
-            try { tempFile.delete() } catch (_: Exception) {}
         }
         Log.d(TAG, "decodeTS done")
     }
