@@ -3,13 +3,12 @@ package com.englishlistener.player
 import android.content.Context
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
-import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.common.audio.AudioProcessor
+import androidx.media3.common.audio.AudioProcessorChain
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.RenderersFactory
-import androidx.media3.exoplayer.audio.AudioProcessorChain
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
@@ -33,9 +32,9 @@ class RadioPlayer(context: Context, private val audioProcessor: AudioCaptureProc
 
     private fun buildPlayer(): ExoPlayer {
         val factory = if (audioProcessor != null) {
-            RenderersFactory { handler, videoListener, audioListener, _, _ ->
+            RenderersFactory { handler, _, audioListener, _, _ ->
                 val chain = object : AudioProcessorChain {
-                    override fun apply(params: PlaybackParameters): AudioProcessor {
+                    override fun apply(input: AudioProcessor): AudioProcessor {
                         return object : AudioProcessor {
                             override fun configure(f: AudioProcessor.AudioFormat) = f
                             override fun isActive() = false
