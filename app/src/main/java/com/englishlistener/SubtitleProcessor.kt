@@ -50,16 +50,13 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
 
         trans = TranslationEngine(translationModel)
         if (!trans!!.initialize()) {
-            val errMsg = "翻译模型加载失败: 文件可能损坏"
-            Log.e(TAG, errMsg)
-            _lines.value = listOf(SubtitleLine(errMsg, "路径: ${translationModel.absolutePath}"))
-            asr?.release(); asr = null
+            Log.e(TAG, "Translation init failed, continuing ASR-only")
             trans = null
-            return false
         }
 
-        Log.d(TAG, "Translation OK, adding audio listener")
-        _lines.value = listOf(SubtitleLine("模型就绪，等待音频...", "请确保已选择电台"))
+        val initMsg = if (trans != null) "模型就绪（含翻译），等待音频..." else "模型就绪（仅ASR），等待音频..."
+        Log.d(TAG, initMsg)
+        _lines.value = listOf(SubtitleLine(initMsg))
         trans?.onTranslation = { eng, ch ->
             val cur = _lines.value.toMutableList()
             val idx = cur.indexOfFirst { it.english == eng }
