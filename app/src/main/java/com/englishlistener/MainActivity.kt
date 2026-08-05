@@ -11,9 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.englishlistener.ui.MainViewModel
@@ -48,6 +46,15 @@ fun EnglishListenerApp(viewModel: MainViewModel = viewModel()) {
         }
 
         com.englishlistener.ui.AppScreen.MAIN -> {
+            var selectedTab by remember { mutableIntStateOf(0) }
+
+            // 切换到字幕tab时自动启动字幕
+            LaunchedEffect(selectedTab) {
+                if (selectedTab == 1 && !uiState.subtitleEnabled) {
+                    viewModel.toggleSubtitle()
+                }
+            }
+
             Scaffold(
                 modifier = Modifier.fillMaxSize(),
                 bottomBar = {
@@ -55,26 +62,34 @@ fun EnglishListenerApp(viewModel: MainViewModel = viewModel()) {
                         NavigationBarItem(
                             icon = { Icon(Icons.Default.Home, contentDescription = "首页") },
                             label = { Text("频道") },
-                            selected = true,
-                            onClick = { }
+                            selected = selectedTab == 0,
+                            onClick = { selectedTab = 0 }
                         )
                         NavigationBarItem(
                             icon = { Icon(Icons.Default.Subtitles, contentDescription = "字幕") },
                             label = { Text("字幕") },
-                            selected = false,
-                            onClick = { }
+                            selected = selectedTab == 1,
+                            onClick = { selectedTab = 1 }
                         )
                     }
                 }
             ) { innerPadding ->
                 Box(modifier = Modifier.padding(innerPadding)) {
-                    HomeScreen(
-                        stations = uiState.stations,
-                        currentStation = uiState.currentStation,
-                        playerState = uiState.playerState,
-                        onStationClick = { viewModel.selectStation(it) },
-                        onTogglePlayPause = { viewModel.togglePlayPause() }
-                    )
+                    if (selectedTab == 0) {
+                        HomeScreen(
+                            stations = uiState.stations,
+                            currentStation = uiState.currentStation,
+                            playerState = uiState.playerState,
+                            onStationClick = { viewModel.selectStation(it) },
+                            onTogglePlayPause = { viewModel.togglePlayPause() }
+                        )
+                    } else {
+                        SubtitleScreen(
+                            englishLines = uiState.englishSubtitles,
+                            chineseLines = uiState.chineseSubtitles,
+                            isActive = uiState.subtitleEnabled
+                        )
+                    }
                 }
             }
         }
