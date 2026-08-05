@@ -4,13 +4,7 @@ import android.content.Context
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
-import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.Renderer
-import androidx.media3.exoplayer.RenderersFactory
-import androidx.media3.exoplayer.audio.DefaultAudioSink
-import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
-import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -29,22 +23,11 @@ class RadioPlayer(context: Context, private val audioProcessor: AudioCaptureProc
     val playerState: StateFlow<PlayerState> = _ps.asStateFlow()
 
     private fun buildPlayer(): ExoPlayer {
-        val ap = audioProcessor
-        return if (ap != null) {
-            val rf = RenderersFactory { handler, _, audioListener, _, _ ->
-                val procs = arrayOf<AudioProcessor>(ap)
-                val sink = DefaultAudioSink.Builder(appContext)
-                    .setAudioProcessors(procs)
-                    .build()
-                arrayOf(MediaCodecAudioRenderer(
-                    appContext, MediaCodecSelector.DEFAULT,
-                    handler, audioListener, sink
-                ))
-            }
-            ExoPlayer.Builder(appContext, rf)
-        } else {
-            ExoPlayer.Builder(appContext)
-        }.setHandleAudioBecomingNoisy(true).build()
+        val builder = ExoPlayer.Builder(appContext)
+        if (audioProcessor != null) {
+            builder.setAudioProcessors(audioProcessor)
+        }
+        return builder.setHandleAudioBecomingNoisy(true).build()
     }
 
     private var player: ExoPlayer = buildPlayer()
