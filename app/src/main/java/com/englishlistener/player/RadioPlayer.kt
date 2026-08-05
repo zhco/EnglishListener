@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.Renderer
 import androidx.media3.exoplayer.RenderersFactory
@@ -31,8 +32,9 @@ class RadioPlayer(context: Context, private val audioProcessor: AudioCaptureProc
         val ap = audioProcessor
         return if (ap != null) {
             val rf = RenderersFactory { handler, _, audioListener, _, _ ->
+                val procs = arrayOf<AudioProcessor>(ap)
                 val sink = DefaultAudioSink.Builder(appContext)
-                    .setAudioProcessors(ap)
+                    .setAudioProcessors(procs)
                     .build()
                 arrayOf(MediaCodecAudioRenderer(
                     appContext, MediaCodecSelector.DEFAULT,
