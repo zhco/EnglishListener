@@ -23,6 +23,7 @@ data class UiState(
     val downloadState: DownloadState = DownloadState(),
     val subtitleEnabled: Boolean = false,
     val subtitleStatus: String = "",
+    val captureStatus: String = "",
     val isLoading: Boolean = false,
     val englishSubtitles: List<String> = emptyList(),
     val chineseSubtitles: List<String> = emptyList()
@@ -40,6 +41,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { player.playerState.collect { ps -> _uiState.value = _uiState.value.copy(playerState = ps) } }
         viewModelScope.launch { modelManager.downloadState.collect { ds -> _uiState.value = _uiState.value.copy(downloadState = ds, isLoading = ds.phase != Phase.COMPLETED); if (ds.phase == Phase.COMPLETED && _uiState.value.screen == AppScreen.SETUP) { delay(1200); _uiState.value = _uiState.value.copy(screen = AppScreen.MAIN, isLoading = false) } } }
         viewModelScope.launch { subtitleProcessor.lines.collect { lines -> _uiState.value = _uiState.value.copy(englishSubtitles = lines.map { it.english }, chineseSubtitles = lines.map { it.chinese }) } }
+        viewModelScope.launch { subtitleProcessor.captureStatus.collect { s -> _uiState.value = _uiState.value.copy(captureStatus = s) } }
     }
 
     fun selectStation(station: RadioStation) { _uiState.value = _uiState.value.copy(currentStation = station, isLoading = true); player.play(station.name, station.streamUrl); _uiState.value = _uiState.value.copy(isLoading = false) }
