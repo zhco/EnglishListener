@@ -2,12 +2,14 @@ package com.englishlistener
 
 import android.util.Log
 import com.englishlistener.asr.AsrEngine
+import com.englishlistener.asr.AsrResult
 import com.englishlistener.player.AudioCaptureProcessor
 import com.englishlistener.translate.TranslationEngine
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.io.File
+import kotlin.math.min
 
 data class SubtitleLine(val english: String, val chinese: String = "")
 
@@ -72,12 +74,35 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
 
     private fun onAudio(samples: FloatArray) {
         audioCount++
-        if (audioCount == 1) Log.d(TAG, "onAudio #1: ${samples.size} samples")
-        if (audioCount <= 3 || audioCount % 100 == 0) Log.d(TAG, "onAudio #$audioCount: ${samples.size} samples")
-        val r = asr?.processSamples(samples) ?: return
-        if (r.isNotBlank()) {
-            val cur = _lines.value.toMutableList()
-            if (cur.none { it.english == r }) { cur.add(SubtitleLine(r)); _lines.value = cur; trans?.submit(r) }
+        val result = asr?.processSamples(samples) ?: return
+        val text = result.text
+        if (text.isBlank()) return
+
+        val cur = _lines.value.toMutableList()
+        // skip placeholder lines (init messages)
+        val realStart = cur.indexOfLast { it.english.startsWith("ASR") || it.english.startsWith("模型") || it.english.startsWith("翻译") }
+        val lastIdx = cur.size - 1
+        val lastReal = if (lastIdx > realStart) lastIdx else -1
+
+        if (lastReal >= 0) {
+            val prev = cur[lastReal].english
+            // same line getting longer: update in-place
+            val prefLen = min(prev.length, 8)
+            val isExtension = (prev.isNotEmpty() && text.startsWith(prev)) ||
+                (text.length > prev.length && prefLen > 0 && text.contains(prev.substring(0, prefLen)))
+            if (isExtension) {
+                cur[lastReal] = SubtitleLine(text)
+                _lines.value = cur
+                trans?.submit(text)
+                return
+            }
+        }
+
+        // genuinely new line (after endpoint or different utterance)
+        if (cur.none { it.english == text }) {
+            cur.add(SubtitleLine(text))
+            _lines.value = cur
+            trans?.submit(text)
         }
     }
 
