@@ -4,6 +4,8 @@ import android.util.Log
 import com.k2fsa.sherpa.onnx.*
 import java.io.File
 
+data class AsrResult(val text: String, val isEndpoint: Boolean)
+
 class AsrEngine(private val asrDir: File) {
     companion object { private const val TAG = "AsrEngine" }
     private var recognizer: OnlineRecognizer? = null
@@ -48,17 +50,34 @@ class AsrEngine(private val asrDir: File) {
         }
     }
 
-    fun processSamples(samples: FloatArray): String? {
+    fun processSamples(samples: FloatArray): AsrResult? {
         val rec = recognizer ?: return null
         val s = stream ?: return null
         try {
             s.acceptWaveform(samples, 16000)
             while (rec.isReady(s)) rec.decode(s)
-            val text = rec.getResult(s).text.trim()
-            if (text.isNotEmpty() && text != lastPartial) { lastPartial = text; return text }
-            if (rec.isEndpoint(s)) rec.reset(s)
+            val raw = rec.getResult(s).text.trim()
+            val isEndpoint = rec.isEndpoint(s)
+            if (isEndpoint) {
+                rec.reset(s)
+                lastPartial = ""
+            }
+            if (raw.isNotEmpty() && raw != lastPartial) {
+                lastPartial = raw
+                return AsrResult(formatText(raw), isEndpoint)
+            }
         } catch (e: Exception) { Log.e(TAG, "processSamples error", e) }
         return null
+    }
+
+    private fun formatText(text: String): String {
+        val lower = text.lowercase().trim()
+        if (lower.isEmpty()) return lower
+        return lower
+            .replace(Regex("([.?!]\\s+)([a-z])")) { m ->
+                m.groupValues[1] + m.groupValues[2].uppercase()
+            }
+            .replaceFirstChar { it.uppercase() }
     }
 
     fun release() {
