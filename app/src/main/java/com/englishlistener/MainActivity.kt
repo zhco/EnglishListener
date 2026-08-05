@@ -1,9 +1,13 @@
 package com.englishlistener
 
+import android.content.Context
+import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -13,6 +17,7 @@ import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.englishlistener.ui.MainViewModel
 import com.englishlistener.ui.screens.HomeScreen
@@ -35,6 +40,19 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun EnglishListenerApp(viewModel: MainViewModel = viewModel()) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    val mpManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+
+    val mediaProjectionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == android.app.Activity.RESULT_OK && result.data != null) {
+            val mp = mpManager.getMediaProjection(result.resultCode, result.data!!)
+            viewModel.startSystemCapture(mp)
+        } else {
+            viewModel.onSystemCaptureDenied()
+        }
+    }
 
     when (uiState.screen) {
         com.englishlistener.ui.AppScreen.SETUP -> {
@@ -87,7 +105,12 @@ fun EnglishListenerApp(viewModel: MainViewModel = viewModel()) {
                             englishLines = uiState.englishSubtitles,
                             chineseLines = uiState.chineseSubtitles,
                             isActive = uiState.subtitleEnabled,
-                            captureStatus = uiState.captureStatus
+                            captureStatus = uiState.captureStatus,
+                            isSystemCapture = uiState.captureMode == com.englishlistener.ui.CaptureMode.SYSTEM,
+                            onRequestSystemCapture = {
+                                val intent = mpManager.createScreenCaptureIntent()
+                                mediaProjectionLauncher.launch(intent)
+                            }
                         )
                     }
                 }
