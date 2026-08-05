@@ -34,18 +34,18 @@ class ModelManager(private val context: Context) {
             "https://hf-mirror.com/AngelSlim/Hy-MT1.5-1.8B-1.25bit-GGUF/resolve/main/$MT_FILE",
             "https://huggingface.co/AngelSlim/Hy-MT1.5-1.8B-1.25bit-GGUF/resolve/main/$MT_FILE"
         )
-        // English-only zipformer model (better English accuracy than bilingual)
         private const val ASR_MODEL = "sherpa-onnx-streaming-zipformer-en-2023-06-26"
         private const val ASR_BASE = "https://hf-mirror.com/csukuangfj/$ASR_MODEL/resolve/main"
         private const val ASR_FB = "https://huggingface.co/csukuangfj/$ASR_MODEL/resolve/main"
         private val ASR_FILES = listOf(
-            Triple("encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx", 74600000L, "语音识别引擎"),
-            Triple("decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx", 1370000L, "语音解码器"),
-            Triple("joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx", 265000L, "连接器"),
-            Triple("tokens.txt", 50000L, "词表")
+            Triple("encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx", 74600000L, "\u8bed\u97f3\u8bc6\u522b\u5f15\u64ce"),
+            Triple("decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx", 1370000L, "\u8bed\u97f3\u89e3\u7801\u5668"),
+            Triple("joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx", 265000L, "\u8fde\u63a5\u5668"),
+            Triple("tokens.txt", 50000L, "\u8bcd\u8868")
         )
         val ASR_REQUIRED_FILES = ASR_FILES.map { it.first }
         private const val VERSION_FILE = "model_version.txt"
+        private const val MAX_REDIRECTS = 5
     }
     private val _ds = MutableStateFlow(DownloadState())
     val downloadState: StateFlow<DownloadState> = _ds.asStateFlow()
@@ -77,7 +77,7 @@ class ModelManager(private val context: Context) {
     suspend fun downloadTranslationModel(): Boolean {
         val f = translationModelFile; val es = if (f.exists()) f.length() else 0L
         if (es >= MT_SIZE * 0.99) return true
-        _ds.value = DownloadState(phase = Phase.DOWNLOADING, currentFile = "混元翻译模型", totalBytes = MT_SIZE)
+        _ds.value = DownloadState(phase = Phase.DOWNLOADING, currentFile = "\u6df7\u5143\u7ffb\u8bd1\u6a21\u578b", totalBytes = MT_SIZE)
         val ok = downloadFile(MT_URLS, f, MT_SIZE, es)
         if (ok) _ds.value = _ds.value.copy(progress = 1f)
         return ok
@@ -98,21 +98,41 @@ class ModelManager(private val context: Context) {
         return isAsrModelReady()
     }
 
+    @Throws(Exception::class)
+    private fun openWithRedirects(urlStr: String): HttpURLConnection {
+        var url = URL(urlStr)
+        var hops = 0
+        while (hops < MAX_REDIRECTS) {
+            val conn = url.openConnection() as HttpURLConnection
+            conn.instanceFollowRedirects = false
+            conn.connectTimeout = 10000
+            conn.readTimeout = 30000
+            conn.setRequestProperty("User-Agent", "EnglishListener/1.0")
+            conn.connect()
+            when (conn.responseCode) {
+                301, 302, 307, 308 -> {
+                    val loc = conn.getHeaderField("Location")
+                    conn.disconnect()
+                    if (loc == null) throw Exception("Redirect without Location")
+                    url = URL(loc)
+                    hops++
+                }
+                else -> return conn
+            }
+        }
+        throw Exception("Too many redirects")
+    }
+
     private suspend fun downloadFile(urls: List<String>, file: File, exp: Long, es: Long): Boolean = withContext(Dispatchers.IO) {
         for (url in urls) {
             try {
-                val c = (URL(url).openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 10000; readTimeout = 30000
-                    setRequestProperty("User-Agent", "EnglishListener/1.0")
-                    if (es > 0) setRequestProperty("Range", "bytes=$es-")
-                    connect()
-                }
+                val c = openWithRedirects(url)
                 val ts = when (c.responseCode) {
                     206 -> c.getHeaderField("Content-Range")?.substringAfter("/")?.toLongOrNull() ?: exp
                     200 -> c.contentLengthLong.coerceAtLeast(exp)
-                    else -> { Log.e(TAG, "HTTP ${c.responseCode} [${url.substringAfterLast('/')}]"); continue }
+                    else -> { Log.e(TAG, "HTTP ${c.responseCode} [${url.substringAfterLast('/')}]"); c.disconnect(); continue }
                 }
-                val inp = c.inputStream ?: continue
+                val inp = c.inputStream ?: run { c.disconnect(); continue }
                 val out = FileOutputStream(file, es > 0)
                 val buf = ByteArray(8192)
                 var d = es
@@ -121,11 +141,11 @@ class ModelManager(private val context: Context) {
                     out.write(buf, 0, n); d += n
                     _ds.value = _ds.value.copy(progress = d.toFloat() / ts)
                 }
-                inp.close(); out.close()
+                inp.close(); out.close(); c.disconnect()
                 if (file.length() >= exp * 0.99) return@withContext true
             } catch (e: Exception) { Log.e(TAG, "dl fail: $url", e) }
         }
-        _ds.value = DownloadState(phase = Phase.FAILED, error = "所有下载源均不可用，请检查网络")
+        _ds.value = DownloadState(phase = Phase.FAILED, error = "\u6240\u6709\u4e0b\u8f7d\u6e90\u5747\u4e0d\u53ef\u7528\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc")
         false
     }
 
