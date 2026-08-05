@@ -22,6 +22,7 @@ data class UiState(
     val playerState: PlayerState = PlayerState(),
     val downloadState: DownloadState = DownloadState(),
     val subtitleEnabled: Boolean = false,
+    val subtitleStatus: String = "",
     val isLoading: Boolean = false,
     val englishSubtitles: List<String> = emptyList(),
     val chineseSubtitles: List<String> = emptyList()
@@ -47,13 +48,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun skipDownload() { _uiState.value = _uiState.value.copy(screen = AppScreen.MAIN) }
     fun toggleSubtitle() {
         val enabled = !_uiState.value.subtitleEnabled
-        _uiState.value = _uiState.value.copy(subtitleEnabled = enabled, isLoading = true)
+        _uiState.value = _uiState.value.copy(subtitleEnabled = enabled, isLoading = true, subtitleStatus = if (enabled) "启动中..." else "")
         if (enabled) {
             val ok = subtitleProcessor.start()
             if (!ok) { _uiState.value = _uiState.value.copy(subtitleEnabled = false, isLoading = false); return }
             val station = _uiState.value.currentStation
             if (station != null) {
+                _uiState.value = _uiState.value.copy(subtitleStatus = "连接电台: ${station.name}")
                 subtitleProcessor.audioProcessor.start(station.streamUrl)
+            } else {
+                _uiState.value = _uiState.value.copy(subtitleStatus = "请先选择电台")
             }
         } else { subtitleProcessor.stop() }
         _uiState.value = _uiState.value.copy(isLoading = false)
