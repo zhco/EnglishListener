@@ -1,9 +1,11 @@
 package com.englishlistener.asr
 
+import android.util.Log
 import com.k2fsa.sherpa.onnx.*
 import java.io.File
 
 class AsrEngine(private val asrDir: File) {
+    companion object { private const val TAG = "AsrEngine" }
     private var recognizer: OnlineRecognizer? = null
     private var stream: OnlineStream? = null
     private var lastPartial = ""
@@ -13,7 +15,16 @@ class AsrEngine(private val asrDir: File) {
         val dec = File(asrDir, "decoder-epoch-99-avg-1.int8.onnx")
         val joi = File(asrDir, "joiner-epoch-99-avg-1.int8.onnx")
         val tok = File(asrDir, "tokens.txt")
-        if (!enc.exists() || !dec.exists() || !joi.exists() || !tok.exists()) return false
+        Log.d(TAG, "asrDir=${asrDir.absolutePath} exists=${asrDir.exists()}")
+        for ((name, f) in listOf("encoder" to enc, "decoder" to dec, "joiner" to joi, "tokens" to tok)) {
+            Log.d(TAG, "  $name: path=${f.absolutePath} exists=${f.exists()} size=${f.length()}")
+        }
+        val missing = listOf("encoder" to enc, "decoder" to dec, "joiner" to joi, "tokens" to tok)
+            .filter { !it.second.exists() }.map { it.first }
+        if (missing.isNotEmpty()) {
+            Log.e(TAG, "Missing ASR files: $missing")
+            return false
+        }
         return try {
             val cfg = OnlineRecognizerConfig(
                 featConfig = FeatureConfig(sampleRate = 16000, featureDim = 80),
@@ -28,8 +39,12 @@ class AsrEngine(private val asrDir: File) {
                 enableEndpoint = true)
             recognizer = OnlineRecognizer(config = cfg)
             stream = recognizer!!.createStream()
+            Log.d(TAG, "ASR initialized OK")
             true
-        } catch (e: Exception) { e.printStackTrace(); false }
+        } catch (e: Exception) {
+            Log.e(TAG, "ASR init exception: ${e.message}", e)
+            false
+        }
     }
 
     fun processSamples(samples: FloatArray): String? {
@@ -41,7 +56,7 @@ class AsrEngine(private val asrDir: File) {
             val text = rec.getResult(s).text.trim()
             if (text.isNotEmpty() && text != lastPartial) { lastPartial = text; return text }
             if (rec.isEndpoint(s)) rec.reset(s)
-        } catch (e: Exception) { e.printStackTrace() }
+        } catch (e: Exception) { Log.e(TAG, "processSamples error", e) }
         return null
     }
 
