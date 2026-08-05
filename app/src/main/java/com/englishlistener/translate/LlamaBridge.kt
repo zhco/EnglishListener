@@ -32,12 +32,12 @@ class LlamaModelParams : Structure() {
 
 @Structure.FieldOrder("n_ctx","n_batch","n_ubatch","n_seq_max","n_threads","n_threads_batch","rope_scaling_type","pooling_type","rope_freq_base","rope_freq_scale","yarn_ext_factor","yarn_attn_factor","yarn_beta_fast","yarn_beta_slow","yarn_orig_ctx","logits_all","embeddings","offload_kqv","flash_attn","no_perf","abort_callback","abort_callback_data")
 class LlamaContextParams : Structure() {
-    @JvmField var n_ctx: Int = 2048
-    @JvmField var n_batch: Int = 512
-    @JvmField var n_ubatch: Int = 512
+    @JvmField var n_ctx: Int = 512
+    @JvmField var n_batch: Int = 256
+    @JvmField var n_ubatch: Int = 256
     @JvmField var n_seq_max: Int = 1
-    @JvmField var n_threads: Int = 4
-    @JvmField var n_threads_batch: Int = 4
+    @JvmField var n_threads: Int = 2
+    @JvmField var n_threads_batch: Int = 2
     @JvmField var rope_scaling_type: Int = 0
     @JvmField var pooling_type: Int = 0
     @JvmField var rope_freq_base: Float = 0f
@@ -75,11 +75,31 @@ class LlamaBatch : Structure() {
 }
 
 class LlamaBridge(modelPath: String) {
-    private val lib = Native.load("llama", LlamaC::class.java)
-    private val model: Pointer = lib.llama_model_load_from_file(modelPath, LlamaModelParams()) ?: throw RuntimeException("llama: load fail")
-    private val ctx: Pointer = lib.llama_new_context_with_model(model, LlamaContextParams().apply { n_ctx = 2048; n_threads = 4 }) ?: throw RuntimeException("llama: ctx fail")
-    private val vocabSize: Int = lib.llama_n_vocab(model)
-    private val eosToken: Int = lib.llama_eos_token(model)
+    private val lib: LlamaC
+    private val model: Pointer
+    private val ctx: Pointer
+    private val vocabSize: Int
+    private val eosToken: Int
+
+    init {
+        lib = Native.load("llama", LlamaC::class.java)
+        val mp = LlamaModelParams()
+        mp.use_mmap = true
+        mp.use_mlock = false
+        mp.n_gpu_layers = 0
+        mp.vocab_only = false
+        model = lib.llama_model_load_from_file(modelPath, mp) ?: throw RuntimeException("llama: model load fail (OOM?)")
+        val cp = LlamaContextParams()
+        cp.n_ctx = 512
+        cp.n_threads = 2
+        cp.n_threads_batch = 2
+        cp.n_batch = 256
+        cp.n_ubatch = 256
+        cp.no_perf = true
+        ctx = lib.llama_new_context_with_model(model, cp) ?: throw RuntimeException("llama: context fail (OOM?)")
+        vocabSize = lib.llama_n_vocab(model)
+        eosToken = lib.llama_eos_token(model)
+    }
 
     fun generate(prompt: String, maxTokens: Int = 256): String {
         val toks = lib.llama_tokenize(model, prompt, 1, true)
