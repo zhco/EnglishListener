@@ -30,15 +30,17 @@ data class UiState(
 class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(UiState())
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
-    val player = RadioPlayer(application)
     val modelManager = ModelManager(application)
     val subtitleProcessor = SubtitleProcessor(modelManager.asrDir, modelManager.translationModelFile)
+    val player = RadioPlayer(application, subtitleProcessor.audioProcessor)
+
     init {
         viewModelScope.launch { if (modelManager.areAllModelsReady()) { _uiState.value = _uiState.value.copy(screen = AppScreen.MAIN, isLoading = true) } }
         viewModelScope.launch { player.playerState.collect { ps -> _uiState.value = _uiState.value.copy(playerState = ps) } }
         viewModelScope.launch { modelManager.downloadState.collect { ds -> _uiState.value = _uiState.value.copy(downloadState = ds, isLoading = ds.phase != Phase.COMPLETED); if (ds.phase == Phase.COMPLETED && _uiState.value.screen == AppScreen.SETUP) { delay(1200); _uiState.value = _uiState.value.copy(screen = AppScreen.MAIN, isLoading = false) } } }
         viewModelScope.launch { subtitleProcessor.lines.collect { lines -> _uiState.value = _uiState.value.copy(englishSubtitles = lines.map { it.english }, chineseSubtitles = lines.map { it.chinese }) } }
     }
+
     fun selectStation(station: RadioStation) { _uiState.value = _uiState.value.copy(currentStation = station, isLoading = true); player.play(station.name, station.streamUrl); _uiState.value = _uiState.value.copy(isLoading = false) }
     fun togglePlayPause() { player.togglePlayPause() }
     fun startDownload() { _uiState.value = _uiState.value.copy(isLoading = true); viewModelScope.launch { modelManager.downloadAllModels() } }
@@ -46,8 +48,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleSubtitle() {
         val enabled = !_uiState.value.subtitleEnabled
         _uiState.value = _uiState.value.copy(subtitleEnabled = enabled, isLoading = true)
-        if (enabled) { val url = _uiState.value.currentStation?.streamUrl; val ok = subtitleProcessor.start(url); if (!ok) { _uiState.value = _uiState.value.copy(subtitleEnabled = false, isLoading = false); return } }
-        else { subtitleProcessor.stop() }
+        if (enabled) {
+            val ok = subtitleProcessor.start()
+            if (!ok) { _uiState.value = _uiState.value.copy(subtitleEnabled = false, isLoading = false); return }
+        } else { subtitleProcessor.stop() }
         _uiState.value = _uiState.value.copy(isLoading = false)
     }
     override fun onCleared() { super.onCleared(); subtitleProcessor.stop(); player.release() }
