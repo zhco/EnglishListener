@@ -17,23 +17,24 @@ class AudioCaptureProcessor {
         private const val TAG = "AudioCapture"
         private const val TARGET_SR = 16000
         private const val BUFFER_SIZE = 4096
-        private const val TS_PACKET_SIZE = 188
     }
 
     private val listeners = CopyOnWriteArrayList<(FloatArray) -> Unit>()
+    private val statusListeners = CopyOnWriteArrayList<(String) -> Unit>()
     private var job: Job? = null
     private var scope: CoroutineScope? = null
     @Volatile var isRunning = false
     private var callCount = 0
     private var fwdCount = 0L
 
-    fun addListener(l: (FloatArray) -> Unit) {
-        listeners.add(l)
-        Log.d(TAG, "listener +, total=${listeners.size}")
-    }
-    fun removeListener(l: (FloatArray) -> Unit) {
-        listeners.remove(l)
-        Log.d(TAG, "listener -, total=${listeners.size}")
+    fun addListener(l: (FloatArray) -> Unit) { listeners.add(l) }
+    fun removeListener(l: (FloatArray) -> Unit) { listeners.remove(l) }
+    fun addStatusListener(l: (String) -> Unit) { statusListeners.add(l) }
+    fun removeStatusListener(l: (String) -> Unit) { statusListeners.remove(l) }
+
+    private fun emitStatus(s: String) {
+        Log.d(TAG, s)
+        for (l in statusListeners) { try { l(s) } catch (e: Exception) {} }
     }
 
     fun start(streamUrl: String) {
@@ -42,10 +43,14 @@ class AudioCaptureProcessor {
         callCount = 0; fwdCount = 0
         scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         job = scope!!.launch {
-            Log.d(TAG, "start: $streamUrl")
+            emitStatus("connecting")
             try { processStream(streamUrl) }
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { Log.e(TAG, "stream error", e) }
+            catch (e: Exception) {
+                Log.e(TAG, "stream error", e)
+                emitStatus("error: ${e.message}")
+            }
+            if (isRunning) emitStatus("disconnected")
         }
     }
 
@@ -54,23 +59,37 @@ class AudioCaptureProcessor {
         job?.cancel()
         scope?.cancel()
         job = null; scope = null
-        Log.d(TAG, "stopped")
+        emitStatus("stopped")
     }
 
     private suspend fun processStream(streamUrl: String) = withContext(Dispatchers.IO) {
+        emitStatus("resolving")
         val resolved = resolveStream(streamUrl)
-        Log.d(TAG, "resolved: $resolved (type=${resolved.type})")
+        Log.d(TAG, "resolved: ${resolved.url} type=${resolved.type}")
+
+        emitStatus("connecting: ${resolved.url.take(50)}")
         val conn = URL(resolved.url).openConnection() as HttpURLConnection
-        conn.connectTimeout = 8000; conn.readTimeout = 15000
+        conn.connectTimeout = 10000; conn.readTimeout = 20000
         conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+        conn.setRequestProperty("Icy-MetaData", "0")
+
+        val code = conn.responseCode
+        if (code !in 200..299) {
+            emitStatus("HTTP $code")
+            conn.disconnect()
+            return@withContext
+        }
+
         val input = conn.inputStream
+        val contentType = conn.contentType ?: ""
+        emitStatus("streaming (${resolved.type})")
 
         if (resolved.isTS) {
             decodeTS(input)
         } else {
             decodeMPEG(input)
         }
-        input.close()
+        try { input.close() } catch (_: Exception) {}
     }
 
     data class ResolvedStream(val url: String, val isTS: Boolean, val type: String)
@@ -84,33 +103,41 @@ class AudioCaptureProcessor {
             val conn = URL(url).openConnection() as HttpURLConnection
             conn.connectTimeout = 5000; conn.readTimeout = 5000
             conn.setRequestProperty("User-Agent", "Mozilla/5.0")
+
+            val code = conn.responseCode
+            if (code in 300..399) {
+                val loc = conn.getHeaderField("Location")
+                conn.disconnect()
+                if (loc != null) return resolveStream(loc, depth + 1)
+            }
+
+            val ct = conn.contentType ?: ""
+            if (ct.startsWith("audio/")) {
+                conn.disconnect()
+                return ResolvedStream(url, false, ct)
+            }
+
             val text = conn.inputStream.bufferedReader().readText()
             conn.disconnect()
 
-            // M3U8 playlist
             if (text.contains("#EXTM3U")) {
-                var bestUrl: String? = null
-                var bestBandwidth = 0
+                var bestUrl: String? = null; var bestBw = 0
                 for (line in text.lines()) {
-                    val trimmed = line.trim()
-                    if (trimmed.startsWith("#EXT-X-STREAM-INF")) {
-                        val bw = Regex("BANDWIDTH=(\\d+)").find(trimmed)?.groupValues?.get(1)?.toIntOrNull() ?: 0
-                        if (bw > bestBandwidth) bestBandwidth = bw
-                    } else if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
-                        bestUrl = if (trimmed.startsWith("http")) trimmed
-                        else URL(URL(url), trimmed).toString()
-                        if (bestBandwidth > 0) break
+                    val t = line.trim()
+                    if (t.startsWith("#EXT-X-STREAM-INF")) {
+                        val bw = Regex("BANDWIDTH=(\\d+)").find(t)?.groupValues?.get(1)?.toIntOrNull() ?: 0
+                        if (bw > bestBw) bestBw = bw
+                    } else if (t.isNotEmpty() && !t.startsWith("#")) {
+                        bestUrl = if (t.startsWith("http")) t else URL(URL(url), t).toString()
+                        if (bestBw > 0) break
                     }
                 }
                 if (bestUrl != null) return resolveStream(bestUrl, depth + 1)
-
-                // No variant playlist, pick first segment
                 for (line in text.lines()) {
-                    val trimmed = line.trim()
-                    if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
-                        val segUrl = if (trimmed.startsWith("http")) trimmed
-                        else URL(URL(url), trimmed).toString()
-                        return resolveStream(segUrl, depth + 1)
+                    val t = line.trim()
+                    if (t.isNotEmpty() && !t.startsWith("#")) {
+                        val seg = if (t.startsWith("http")) t else URL(URL(url), t).toString()
+                        return resolveStream(seg, depth + 1)
                     }
                 }
             }
@@ -122,11 +149,8 @@ class AudioCaptureProcessor {
 
     private suspend fun decodeMPEG(input: InputStream) {
         Log.d(TAG, "decodeMPEG start")
-        val codec = try {
-            MediaCodec.createDecoderByType("audio/mpeg")
-        } catch (e: Exception) {
-            Log.e(TAG, "no audio/mpeg decoder", e); return
-        }
+        val codec = try { MediaCodec.createDecoderByType("audio/mpeg") }
+        catch (e: Exception) { Log.e(TAG, "no audio/mpeg decoder", e); emitStatus("no codec"); return }
         codec.configure(MediaFormat.createAudioFormat("audio/mpeg", 44100, 2), null, null, 0)
         codec.start()
 
@@ -157,14 +181,14 @@ class AudioCaptureProcessor {
                 if (pair.first.isNotEmpty()) {
                     fwdCount += pair.first.size
                     callCount++
-                    if (callCount % 50 == 0) Log.d(TAG, "mp3 fwd ${pair.first.size}smp total=$fwdCount")
+                    if (callCount == 1) emitStatus("receiving audio")
+                    if (callCount % 100 == 0) emitStatus("audio chunks: $callCount")
                     notifyListeners(pair.first)
                 }
                 codec.releaseOutputBuffer(outIdx, false)
             }
         }
         codec.stop(); codec.release()
-        Log.d(TAG, "decodeMPEG done")
     }
 
     private suspend fun decodeTS(input: InputStream) = withContext(Dispatchers.IO) {
@@ -174,31 +198,26 @@ class AudioCaptureProcessor {
             val readFd = pipe[0]
             val writeFd = pipe[1]
 
-            // Writer coroutine: pump HTTP stream into pipe
             val pumpJob = launch(Dispatchers.IO) {
                 try {
                     val out = android.os.ParcelFileDescriptor.AutoCloseOutputStream(writeFd)
                     val buf = ByteArray(BUFFER_SIZE * 4)
-                    var totalWritten = 0L
+                    var tw = 0L
                     while (isRunning) {
                         val n = input.read(buf)
                         if (n < 0) break
                         out.write(buf, 0, n)
-                        totalWritten += n
-                        // throttle: don't fill pipe faster than extractor reads
-                        if (totalWritten > 512 * 1024) { delay(5) }
+                        tw += n
+                        if (tw > 512 * 1024) { delay(5) }
                     }
                     out.close()
-                } catch (e: Exception) {
-                    Log.w(TAG, "pipe writer error: ${e.message}")
-                }
+                } catch (e: Exception) { Log.w(TAG, "pipe writer: ${e.message}") }
             }
 
             val extractor = MediaExtractor()
             extractor.setDataSource(readFd.fileDescriptor, 0, Long.MAX_VALUE)
-            
-            var audioTrack = -1
-            var format: MediaFormat? = null
+
+            var audioTrack = -1; var format: MediaFormat? = null
             for (i in 0 until extractor.trackCount) {
                 val fmt = extractor.getTrackFormat(i)
                 if (fmt.getString(MediaFormat.KEY_MIME)?.startsWith("audio/") == true) {
@@ -206,17 +225,13 @@ class AudioCaptureProcessor {
                 }
             }
             if (audioTrack < 0 || format == null) {
-                Log.w(TAG, "no audio track in TS")
-                pumpJob.cancel()
-                extractor.release()
-                readFd.close()
+                Log.w(TAG, "no audio track"); pumpJob.cancel(); extractor.release(); readFd.close()
+                emitStatus("no audio track")
                 return@withContext
             }
-            Log.d(TAG, "TS audio: ${format.getString(MediaFormat.KEY_MIME)} sr=${format.getInteger(MediaFormat.KEY_SAMPLE_RATE)} ch=${format.getInteger(MediaFormat.KEY_CHANNEL_COUNT)}")
 
             extractor.selectTrack(audioTrack)
-            val mime = format.getString(MediaFormat.KEY_MIME)!!
-            val codec = MediaCodec.createDecoderByType(mime)
+            val codec = MediaCodec.createDecoderByType(format.getString(MediaFormat.KEY_MIME)!!)
             codec.configure(format, null, null, 0)
             codec.start()
 
@@ -228,49 +243,36 @@ class AudioCaptureProcessor {
                 val idx = codec.dequeueInputBuffer(5000)
                 if (idx >= 0) {
                     val inBuf = codec.getInputBuffer(idx)!!
-                    val sampleSize = extractor.readSampleData(inBuf, 0)
-                    if (sampleSize < 0) {
-                        codec.queueInputBuffer(idx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
-                        eos = true
-                    } else {
-                        codec.queueInputBuffer(idx, 0, sampleSize, extractor.sampleTime, 0)
-                        extractor.advance()
-                    }
+                    val sz = extractor.readSampleData(inBuf, 0)
+                    if (sz < 0) { codec.queueInputBuffer(idx, 0, 0, 0, MediaCodec.BUFFER_FLAG_END_OF_STREAM); eos = true }
+                    else { codec.queueInputBuffer(idx, 0, sz, extractor.sampleTime, 0); extractor.advance() }
                 }
-
                 val outIdx = codec.dequeueOutputBuffer(bufInfo, 5000)
                 if (outIdx >= 0) {
                     val outBuf = codec.getOutputBuffer(outIdx) ?: continue
                     val pair = processPCM(outBuf, bufInfo, leftover)
                     leftover = pair.second
                     if (pair.first.isNotEmpty()) {
-                        fwdCount += pair.first.size
-                        callCount++
-                        if (callCount % 50 == 0) Log.d(TAG, "ts fwd ${pair.first.size}smp total=$fwdCount")
+                        fwdCount += pair.first.size; callCount++
+                        if (callCount == 1) emitStatus("receiving audio")
+                        if (callCount % 100 == 0) emitStatus("audio chunks: $callCount")
                         notifyListeners(pair.first)
                     }
                     codec.releaseOutputBuffer(outIdx, false)
                 }
             }
-            codec.stop(); codec.release()
-            extractor.release()
-            pumpJob.cancel()
-            readFd.close()
-        } catch (e: Exception) {
-            Log.e(TAG, "TS decode error", e)
-        }
-        Log.d(TAG, "decodeTS done")
+            codec.stop(); codec.release(); extractor.release()
+            pumpJob.cancel(); readFd.close()
+        } catch (e: Exception) { Log.e(TAG, "TS error", e); emitStatus("decode error: ${e.message}") }
     }
 
     private fun processPCM(outBuf: ByteBuffer, bufInfo: MediaCodec.BufferInfo, leftover: FloatArray): Pair<FloatArray, FloatArray> {
         val size = bufInfo.size
         if (size <= 0) return Pair(FloatArray(0), leftover)
-        val srcSR = 44100 // default, MediaCodec typically outputs this for MP3
-        val srcCh = 2
+        val srcSR = 44100; val srcCh = 2
         val shorts = ShortArray(size / 2)
         outBuf.position(bufInfo.offset)
         outBuf.asShortBuffer().apply { position(0); get(shorts) }
-
         val monoLen = size / 2 / srcCh
         val mono = FloatArray(monoLen)
         for (i in 0 until monoLen) {
@@ -278,8 +280,7 @@ class AudioCaptureProcessor {
             for (ch in 0 until srcCh) sum += shorts[i * srcCh + ch].toInt()
             mono[i] = sum / (32768f * srcCh)
         }
-        val combined = leftover + mono
-        return resampleLinear(combined, srcSR, TARGET_SR)
+        return resampleLinear(leftover + mono, srcSR, TARGET_SR)
     }
 
     private fun resampleLinear(input: FloatArray, src: Int, dst: Int): Pair<FloatArray, FloatArray> {
@@ -288,17 +289,12 @@ class AudioCaptureProcessor {
         val n = ((input.size - 1) / r).toInt()
         if (n <= 0) return Pair(FloatArray(0), input)
         val o = FloatArray(n)
-        for (i in 0 until n) {
-            val p = i * r; val j = p.toInt(); val f = p - j
-            o[i] = if (j + 1 < input.size) input[j] * (1f - f) + input[j + 1] * f else input[j]
-        }
+        for (i in 0 until n) { val p = i * r; val j = p.toInt(); val f = p - j; o[i] = if (j + 1 < input.size) input[j] * (1f - f) + input[j + 1] * f else input[j] }
         val c = (n * r).toInt()
         return Pair(o, if (c < input.size) input.copyOfRange(c, input.size) else FloatArray(0))
     }
 
     private fun notifyListeners(samples: FloatArray) {
-        for (l in listeners) {
-            try { l(samples) } catch (e: Exception) { Log.e(TAG, "l err", e) }
-        }
+        for (l in listeners) { try { l(samples) } catch (e: Exception) { Log.e(TAG, "listener err", e) } }
     }
 }
