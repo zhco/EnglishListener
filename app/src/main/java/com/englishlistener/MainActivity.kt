@@ -48,7 +48,6 @@ fun EnglishListenerApp(viewModel: MainViewModel = viewModel()) {
         com.englishlistener.ui.AppScreen.MAIN -> {
             var selectedTab by remember { mutableIntStateOf(0) }
 
-            // 切换到字幕tab时自动启动字幕
             LaunchedEffect(selectedTab) {
                 if (selectedTab == 1 && !uiState.subtitleEnabled) {
                     viewModel.toggleSubtitle()
@@ -87,7 +86,8 @@ fun EnglishListenerApp(viewModel: MainViewModel = viewModel()) {
                         SubtitleScreen(
                             englishLines = uiState.englishSubtitles,
                             chineseLines = uiState.chineseSubtitles,
-                            isActive = uiState.subtitleEnabled
+                            isActive = uiState.subtitleEnabled,
+                            captureStatus = uiState.captureStatus
                         )
                     }
                 }
