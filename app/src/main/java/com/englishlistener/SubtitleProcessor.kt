@@ -21,31 +21,43 @@ class SubtitleProcessor(private val asrDir: File, private val translationModel: 
     val lines: StateFlow<List<SubtitleLine>> = _lines
     private val _running = MutableStateFlow(false)
     val isRunning: StateFlow<Boolean> = _running
+    private var audioCount = 0
 
     fun start(): Boolean {
         if (_running.value) return true
-        asr = AsrEngine(asrDir).also { if (!it.initialize()) { stop(); return false } }
-        trans = TranslationEngine(translationModel).also { if (!it.initialize()) { stop(); return false } }
+        Log.d(TAG, "start: initializing ASR...")
+        asr = AsrEngine(asrDir).also { if (!it.initialize()) { Log.e(TAG, "ASR init failed"); stop(); return false } }
+        Log.d(TAG, "ASR initialized OK, initializing translation...")
+        trans = TranslationEngine(translationModel).also { if (!it.initialize()) { Log.e(TAG, "Translation init failed"); stop(); return false } }
+        Log.d(TAG, "Translation initialized OK, adding audio listener")
         trans?.onTranslation = { eng, ch ->
+            Log.d(TAG, "translation: $eng -> $ch")
             val cur = _lines.value.toMutableList()
             val idx = cur.indexOfFirst { it.english == eng }
             if (idx >= 0) cur[idx] = cur[idx].copy(chinese = ch)
             else cur.add(SubtitleLine(eng, ch))
             _lines.value = cur
         }
+        audioCount = 0
         audioProcessor.addListener(::onAudio)
-        _running.value = true; return true
+        _running.value = true
+        Log.d(TAG, "start: running=true, listener registered")
+        return true
     }
 
     private fun onAudio(samples: FloatArray) {
+        audioCount++
+        if (audioCount <= 3 || audioCount % 100 == 0) Log.d(TAG, "onAudio #$audioCount: ${samples.size} samples")
         val r = asr?.processSamples(samples) ?: return
         if (r.isNotBlank()) {
+            Log.d(TAG, "ASR result: $r")
             val cur = _lines.value.toMutableList()
             if (cur.none { it.english == r }) { cur.add(SubtitleLine(r)); _lines.value = cur; trans?.submit(r) }
         }
     }
 
     fun stop() {
+        Log.d(TAG, "stop")
         _running.value = false
         audioProcessor.removeListener(::onAudio)
         asr?.release(); trans?.release()
