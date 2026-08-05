@@ -51,6 +51,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (enabled) {
             val ok = subtitleProcessor.start()
             if (!ok) { _uiState.value = _uiState.value.copy(subtitleEnabled = false, isLoading = false); return }
+            val station = _uiState.value.currentStation
+            if (station != null) {
+                subtitleProcessor.audioProcessor.start(station.streamUrl)
+            }
         } else { subtitleProcessor.stop() }
         _uiState.value = _uiState.value.copy(isLoading = false)
     }
