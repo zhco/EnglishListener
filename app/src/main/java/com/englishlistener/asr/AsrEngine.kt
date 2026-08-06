@@ -14,9 +14,9 @@ class AsrEngine(private val asrDir: File) {
 
     /** Returns null on success, error message on failure */
     fun initialize(): String? {
-        val enc = File(asrDir, "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx")
-        val dec = File(asrDir, "decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx")
-        val joi = File(asrDir, "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx")
+        val enc = File(asrDir, "encoder.int8.onnx")
+        val dec = File(asrDir, "decoder.int8.onnx")
+        val joi = File(asrDir, "joiner.int8.onnx")
         val tok = File(asrDir, "tokens.txt")
         Log.d(TAG, "asrDir=${asrDir.absolutePath} exists=${asrDir.exists()}")
         for ((name, f) in listOf("encoder" to enc, "decoder" to dec, "joiner" to joi, "tokens" to tok)) {
@@ -33,7 +33,7 @@ class AsrEngine(private val asrDir: File) {
                 modelConfig = OnlineModelConfig(
                     transducer = OnlineTransducerModelConfig(
                         encoder = enc.absolutePath, decoder = dec.absolutePath, joiner = joi.absolutePath),
-                    tokens = tok.absolutePath, numThreads = 2, provider = "cpu", modelType = "zipformer"),
+                    tokens = tok.absolutePath, numThreads = 2, provider = "cpu", modelType = "nemo_transducer"),
                 endpointConfig = EndpointConfig(
                     rule1 = EndpointRule(false, 2.4f, 0.0f),
                     rule2 = EndpointRule(true, 1.2f, 0.0f),
