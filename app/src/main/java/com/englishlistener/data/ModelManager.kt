@@ -98,22 +98,52 @@ class ModelManager(private val context: Context) {
         return isAsrModelReady()
     }
 
-    @Throws(Exception::class)
-    private fun openWithRedirects(urlStr: String): HttpURLConnection {
+    private suspend fun downloadFile(urls: List<String>, file: File, exp: Long, es: Long): Boolean {
+        for (url in urls) {
+            val ok = withContext(Dispatchers.IO) { tryDownload(url, file, exp, es) }
+            if (ok) return true
+        }
+        _ds.value = DownloadState(phase = Phase.FAILED, error = "\u6240\u6709\u4e0b\u8f7d\u6e90\u5747\u4e0d\u53ef\u7528\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc")
+        return false
+    }
+
+    private fun tryDownload(url: String, file: File, exp: Long, es: Long): Boolean {
+        try {
+            val conn = followRedirects(url)
+            val ts = when (conn.responseCode) {
+                206 -> conn.getHeaderField("Content-Range")?.substringAfter("/")?.toLongOrNull() ?: exp
+                200 -> conn.contentLengthLong.coerceAtLeast(exp)
+                else -> { Log.e(TAG, "HTTP ${conn.responseCode} [${url.substringAfterLast('/')}]"); conn.disconnect(); return false }
+            }
+            val inp = conn.inputStream ?: run { conn.disconnect(); return false }
+            val out = FileOutputStream(file, es > 0)
+            val buf = ByteArray(8192)
+            var d = es
+            var n: Int
+            while (inp.read(buf).also { n = it } != -1) {
+                out.write(buf, 0, n); d += n
+                _ds.value = _ds.value.copy(progress = d.toFloat() / ts)
+            }
+            inp.close(); out.close(); conn.disconnect()
+            return file.length() >= exp * 0.99
+        } catch (e: Exception) { Log.e(TAG, "dl fail: $url", e); return false }
+    }
+
+    private fun followRedirects(urlStr: String): HttpURLConnection {
         var url = URL(urlStr)
         var hops = 0
         while (hops < MAX_REDIRECTS) {
-            val conn = url.openConnection() as HttpURLConnection
-            conn.instanceFollowRedirects = false
-            conn.connectTimeout = 10000
-            conn.readTimeout = 30000
-            conn.setRequestProperty("User-Agent", "EnglishListener/1.0")
-            conn.connect()
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                instanceFollowRedirects = false
+                connectTimeout = 10000
+                readTimeout = 30000
+                setRequestProperty("User-Agent", "EnglishListener/1.0")
+                connect()
+            }
             when (conn.responseCode) {
                 301, 302, 307, 308 -> {
-                    val loc = conn.getHeaderField("Location")
+                    val loc = conn.getHeaderField("Location") ?: throw Exception("Redirect without Location")
                     conn.disconnect()
-                    if (loc == null) throw Exception("Redirect without Location")
                     url = URL(loc)
                     hops++
                 }
@@ -121,32 +151,6 @@ class ModelManager(private val context: Context) {
             }
         }
         throw Exception("Too many redirects")
-    }
-
-    private suspend fun downloadFile(urls: List<String>, file: File, exp: Long, es: Long): Boolean = withContext(Dispatchers.IO) {
-        for (url in urls) {
-            try {
-                val c = openWithRedirects(url)
-                val ts = when (c.responseCode) {
-                    206 -> c.getHeaderField("Content-Range")?.substringAfter("/")?.toLongOrNull() ?: exp
-                    200 -> c.contentLengthLong.coerceAtLeast(exp)
-                    else -> { Log.e(TAG, "HTTP ${c.responseCode} [${url.substringAfterLast('/')}]"); c.disconnect(); continue }
-                }
-                val inp = c.inputStream ?: run { c.disconnect(); continue }
-                val out = FileOutputStream(file, es > 0)
-                val buf = ByteArray(8192)
-                var d = es
-                var n: Int
-                while (inp.read(buf).also { n = it } != -1) {
-                    out.write(buf, 0, n); d += n
-                    _ds.value = _ds.value.copy(progress = d.toFloat() / ts)
-                }
-                inp.close(); out.close(); c.disconnect()
-                if (file.length() >= exp * 0.99) return@withContext true
-            } catch (e: Exception) { Log.e(TAG, "dl fail: $url", e) }
-        }
-        _ds.value = DownloadState(phase = Phase.FAILED, error = "\u6240\u6709\u4e0b\u8f7d\u6e90\u5747\u4e0d\u53ef\u7528\uff0c\u8bf7\u68c0\u67e5\u7f51\u7edc")
-        false
     }
 
     fun deleteModels() { modelsDir.deleteRecursively(); _ds.value = DownloadState(phase = Phase.IDLE) }
