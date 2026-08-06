@@ -21,9 +21,7 @@ data class DownloadState(
     val error: String? = null
 )
 
-enum class Phase {
-    IDLE, CHECKING, DOWNLOADING, VERIFYING, COMPLETED, FAILED
-}
+enum class Phase { IDLE, CHECKING, DOWNLOADING, VERIFYING, COMPLETED, FAILED }
 
 class ModelManager(private val context: Context) {
     companion object {
@@ -109,48 +107,64 @@ class ModelManager(private val context: Context) {
 
     private fun tryDownload(url: String, file: File, exp: Long, es: Long): Boolean {
         try {
-            val conn = followRedirects(url)
-            val ts = when (conn.responseCode) {
-                206 -> conn.getHeaderField("Content-Range")?.substringAfter("/")?.toLongOrNull() ?: exp
-                200 -> conn.contentLengthLong.coerceAtLeast(exp)
-                else -> { Log.e(TAG, "HTTP ${conn.responseCode} [${url.substringAfterLast('/')}]"); conn.disconnect(); return false }
+            var rangeOff = es
+            while (true) {
+                val conn = openConnection(url, rangeOff)
+                val resp = conn.responseCode
+                if (resp != 200 && resp != 206) {
+                    Log.e(TAG, "HTTP $resp [${url.substringAfterLast('/')}]")
+                    conn.disconnect()
+                    return false
+                }
+                val total = if (resp == 206) {
+                    conn.getHeaderField("Content-Range")?.substringAfter("/")?.toLongOrNull() ?: exp
+                } else {
+                    conn.contentLengthLong.coerceAtLeast(exp)
+                }
+                if (resp == 200 && rangeOff > 0) {
+                    conn.disconnect()
+                    rangeOff = 0
+                    file.delete()
+                    continue
+                }
+                val inp = conn.inputStream
+                if (inp == null) { conn.disconnect(); return false }
+                val out = FileOutputStream(file, rangeOff > 0)
+                val buf = ByteArray(8192)
+                var d = rangeOff
+                var n: Int
+                while (inp.read(buf).also { n = it } != -1) {
+                    out.write(buf, 0, n); d += n
+                    _ds.value = _ds.value.copy(progress = d.toFloat() / total)
+                }
+                inp.close(); out.close(); conn.disconnect()
+                return file.length() >= exp * 0.99
             }
-            val inp = conn.inputStream ?: run { conn.disconnect(); return false }
-            val out = FileOutputStream(file, es > 0)
-            val buf = ByteArray(8192)
-            var d = es
-            var n: Int
-            while (inp.read(buf).also { n = it } != -1) {
-                out.write(buf, 0, n); d += n
-                _ds.value = _ds.value.copy(progress = d.toFloat() / ts)
-            }
-            inp.close(); out.close(); conn.disconnect()
-            return file.length() >= exp * 0.99
         } catch (e: Exception) { Log.e(TAG, "dl fail: $url", e); return false }
     }
 
-    private fun followRedirects(urlStr: String): HttpURLConnection {
+    private fun openConnection(urlStr: String, rangeOff: Long): HttpURLConnection {
         var url = URL(urlStr)
         var hops = 0
-        while (hops < MAX_REDIRECTS) {
+        while (true) {
             val conn = (url.openConnection() as HttpURLConnection).apply {
                 instanceFollowRedirects = false
                 connectTimeout = 10000
                 readTimeout = 30000
                 setRequestProperty("User-Agent", "EnglishListener/1.0")
+                if (rangeOff > 0) setRequestProperty("Range", "bytes=$rangeOff-")
                 connect()
             }
-            when (conn.responseCode) {
-                301, 302, 307, 308 -> {
-                    val loc = conn.getHeaderField("Location") ?: throw Exception("Redirect without Location")
-                    conn.disconnect()
-                    url = URL(loc)
-                    hops++
-                }
-                else -> return conn
+            if (conn.responseCode in listOf(301, 302, 307, 308)) {
+                val loc = conn.getHeaderField("Location")
+                    ?: throw Exception("Redirect without Location")
+                conn.disconnect()
+                if (++hops >= MAX_REDIRECTS) throw Exception("Too many redirects")
+                url = URL(loc)
+            } else {
+                return conn
             }
         }
-        throw Exception("Too many redirects")
     }
 
     fun deleteModels() { modelsDir.deleteRecursively(); _ds.value = DownloadState(phase = Phase.IDLE) }
