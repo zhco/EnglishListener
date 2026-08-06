@@ -32,16 +32,16 @@ class ModelManager(private val context: Context) {
             "https://hf-mirror.com/AngelSlim/Hy-MT1.5-1.8B-1.25bit-GGUF/resolve/main/$MT_FILE",
             "https://huggingface.co/AngelSlim/Hy-MT1.5-1.8B-1.25bit-GGUF/resolve/main/$MT_FILE"
         )
-        private const val ASR_MODEL = "sherpa-onnx-streaming-zipformer-en-2023-06-26"
+        private const val ASR_MODEL = "sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms"
         private val ASR_URLS = listOf(
-            "https://hf-mirror.com/csukuangfj/$ASR_MODEL/resolve/main",
-            "https://huggingface.co/csukuangfj/$ASR_MODEL/resolve/main"
+            "https://hf-mirror.com/csukuangfj2/$ASR_MODEL/resolve/main",
+            "https://huggingface.co/csukuangfj2/$ASR_MODEL/resolve/main"
         )
         private val ASR_FILES = listOf(
-            Triple("encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx", 71083163L, "语音识别引擎"),
-            Triple("decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx", 1370000L, "语音解码器"),
-            Triple("joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx", 265000L, "连接器"),
-            Triple("tokens.txt", 5050L, "词表")
+            Triple("encoder.int8.onnx", 654046389L, "语音识别引擎"),
+            Triple("decoder.int8.onnx", 7613000L, "语音解码器"),
+            Triple("joiner.int8.onnx", 1825000L, "连接器"),
+            Triple("tokens.txt", 9167L, "词表")
         )
         val ASR_REQUIRED_FILES = ASR_FILES.map { it.first }
         private const val VERSION_FILE = "model_version.txt"
