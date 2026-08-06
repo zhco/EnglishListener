@@ -32,13 +32,16 @@ class ModelManager(private val context: Context) {
             "https://hf-mirror.com/AngelSlim/Hy-MT1.5-1.8B-1.25bit-GGUF/resolve/main/$MT_FILE",
             "https://huggingface.co/AngelSlim/Hy-MT1.5-1.8B-1.25bit-GGUF/resolve/main/$MT_FILE"
         )
-        private const val ASR_MODEL = "sherpa-onnx-streaming-zipformer-bilingual-zh-en-2023-02-20"
-        private const val ASR_URL = "https://modelscope.cn/models/pkufool/$ASR_MODEL/resolve/master"
+        private const val ASR_MODEL = "sherpa-onnx-streaming-zipformer-en-2023-06-26"
+        private val ASR_URLS = listOf(
+            "https://hf-mirror.com/csukuangfj/$ASR_MODEL/resolve/main",
+            "https://huggingface.co/csukuangfj/$ASR_MODEL/resolve/main"
+        )
         private val ASR_FILES = listOf(
-            Triple("encoder-epoch-99-avg-1.int8.onnx", 181895032L, "语音识别引擎"),
-            Triple("decoder-epoch-99-avg-1.int8.onnx", 13091040L, "语音解码器"),
-            Triple("joiner-epoch-99-avg-1.int8.onnx", 3228404L, "连接器"),
-            Triple("tokens.txt", 56317L, "词表")
+            Triple("encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx", 71083163L, "语音识别引擎"),
+            Triple("decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx", 1370000L, "语音解码器"),
+            Triple("joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx", 265000L, "连接器"),
+            Triple("tokens.txt", 5050L, "词表")
         )
         val ASR_REQUIRED_FILES = ASR_FILES.map { it.first }
         private const val VERSION_FILE = "model_version.txt"
@@ -86,7 +89,8 @@ class ModelManager(private val context: Context) {
             val f = File(asrDir, n); val es = if (f.exists()) f.length() else 0L
             if (es >= s * 0.99) continue
             _ds.value = DownloadState(phase = Phase.DOWNLOADING, currentFile = "$l ($n)", totalBytes = s)
-            if (!downloadFile(listOf("$ASR_URL/$n"), f, s, es)) return false
+            val urls = ASR_URLS.map { "$it/$n" }
+            if (!downloadFile(urls, f, s, es)) return false
             _ds.value = _ds.value.copy(progress = 1f)
         }
         File(asrDir, VERSION_FILE).writeText(ASR_MODEL)
@@ -107,17 +111,10 @@ class ModelManager(private val context: Context) {
         try {
             var rangeOff = es
             while (true) {
-                val conn = (URL(url).openConnection() as HttpURLConnection).apply {
-                    instanceFollowRedirects = true
-                    connectTimeout = 10000
-                    readTimeout = 30000
-                    setRequestProperty("User-Agent", "EnglishListener/1.0")
-                    if (rangeOff > 0) setRequestProperty("Range", "bytes=$rangeOff-")
-                    connect()
-                }
+                val conn = openConnection(url, rangeOff)
                 val resp = conn.responseCode
                 if (resp != 200 && resp != 206) {
-                    Log.e(TAG, "HTTP $resp [${url.substringAfterLast('/')}]")
+                    Log.e(TAG, "HTTP $resp [${conn.url}]")
                     conn.disconnect()
                     return false
                 }
@@ -146,6 +143,30 @@ class ModelManager(private val context: Context) {
                 return file.length() >= exp * 0.99
             }
         } catch (e: Exception) { Log.e(TAG, "dl fail: $url", e); return false }
+    }
+
+    private fun openConnection(url: String, rangeOff: Long): HttpURLConnection {
+        var currentUrl = url
+        repeat(5) {
+            val conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
+                instanceFollowRedirects = false
+                connectTimeout = 10000
+                readTimeout = 30000
+                setRequestProperty("User-Agent", "EnglishListener/1.0")
+                if (rangeOff > 0) setRequestProperty("Range", "bytes=$rangeOff-")
+                connect()
+            }
+            val code = conn.responseCode
+            if (code in 200..299) return conn
+            if (code in 300..399) {
+                val loc = conn.getHeaderField("Location") ?: return conn
+                conn.disconnect()
+                currentUrl = if (loc.startsWith("http")) loc else URL(URL(currentUrl), loc).toString()
+                continue
+            }
+            return conn
+        }
+        return URL(currentUrl).openConnection() as HttpURLConnection
     }
 
     fun deleteModels() { modelsDir.deleteRecursively(); _ds.value = DownloadState(phase = Phase.IDLE) }
