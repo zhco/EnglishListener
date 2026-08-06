@@ -14,9 +14,9 @@ class AsrEngine(private val asrDir: File) {
 
     /** Returns null on success, error message on failure */
     fun initialize(): String? {
-        val enc = File(asrDir, "encoder-epoch-99-avg-1.int8.onnx")
-        val dec = File(asrDir, "decoder-epoch-99-avg-1.int8.onnx")
-        val joi = File(asrDir, "joiner-epoch-99-avg-1.int8.onnx")
+        val enc = File(asrDir, "encoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx")
+        val dec = File(asrDir, "decoder-epoch-99-avg-1-chunk-16-left-128.int8.onnx")
+        val joi = File(asrDir, "joiner-epoch-99-avg-1-chunk-16-left-128.int8.onnx")
         val tok = File(asrDir, "tokens.txt")
         Log.d(TAG, "asrDir=${asrDir.absolutePath} exists=${asrDir.exists()}")
         for ((name, f) in listOf("encoder" to enc, "decoder" to dec, "joiner" to joi, "tokens" to tok)) {
