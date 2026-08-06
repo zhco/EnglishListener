@@ -147,7 +147,7 @@ class ModelManager(private val context: Context) {
 
     private fun openConnection(url: String, rangeOff: Long): HttpURLConnection {
         var currentUrl = url
-        repeat(5) {
+        for (hop in 0 until 5) {
             val conn = (URL(currentUrl).openConnection() as HttpURLConnection).apply {
                 instanceFollowRedirects = false
                 connectTimeout = 10000
@@ -159,12 +159,14 @@ class ModelManager(private val context: Context) {
             val code = conn.responseCode
             if (code in 200..299) return conn
             if (code in 300..399) {
-                val loc = conn.getHeaderField("Location") ?: return conn
+                val loc = conn.getHeaderField("Location")
                 conn.disconnect()
-                currentUrl = if (loc.startsWith("http")) loc else URL(URL(currentUrl), loc).toString()
-                continue
+                if (loc != null) {
+                    currentUrl = if (loc.startsWith("http")) loc else URL(URL(currentUrl), loc).toString()
+                }
+            } else {
+                return conn
             }
-            return conn
         }
         return URL(currentUrl).openConnection() as HttpURLConnection
     }
