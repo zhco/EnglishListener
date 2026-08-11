@@ -34,7 +34,7 @@ class ModelManager(private val context: Context) {
         )
         private const val ASR_MODEL = "sherpa-onnx-nemo-parakeet-unified-en-0.6b-int8-streaming-560ms"
         private val ASR_URLS = listOf(
-            "https://hf-mirror.com/csukuangfj2/$ASR_MODEL/resolve/main",
+            "https://github.com/zhco/EnglishListener/releases/download/v1.0.42",
             "https://huggingface.co/csukuangfj2/$ASR_MODEL/resolve/main"
         )
         private val ASR_FILES = listOf(
